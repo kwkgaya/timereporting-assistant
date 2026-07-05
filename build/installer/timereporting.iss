@@ -31,6 +31,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+; Never prompt to close running processes — kill them automatically.
+CloseApplications=force
+RestartApplications=no
 
 [Components]
 Name: "core"; Description: "Core application (review UI + CLI)"; Types: full custom; Flags: fixed
@@ -64,3 +67,13 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 [Run]
 Filename: "{app}\tray.exe"; Description: "Start tray app now (recommended)"; \
   Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Silently terminate all app processes before files are deleted.
+; This prevents the "application has to be closed" prompt on uninstall.
+Filename: "taskkill"; Parameters: "/f /im tray.exe"; \
+  Flags: runhidden skipifdoesntexist
+Filename: "taskkill"; Parameters: "/f /im timeporting.exe"; \
+  Flags: runhidden skipifdoesntexist
+Filename: "taskkill"; Parameters: "/f /im mockjira.exe"; \
+  Flags: runhidden skipifdoesntexist
