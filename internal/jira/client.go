@@ -87,16 +87,26 @@ func tryMyself(client *http.Client, base, email, token string) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil
 	}
+	// "scope does not match" on /myself means auth passed but the /myself endpoint
+	// isn't in scope (read:me was not granted). For our purposes (read/write worklogs)
+	// this is fine — consider auth validated.
+	if resp.StatusCode == http.StatusUnauthorized {
+		var body struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		if strings.Contains(strings.ToLower(body.Message), "scope") {
+			return nil // auth valid; /myself just not in token scope
+		}
+	}
 	return fmt.Errorf("status %d", resp.StatusCode)
 }
 
 // setAuth sets the correct Authorization header.
-// Scoped tokens at api.atlassian.com use Bearer auth (token only, no email).
-// Classic tokens at the domain URL use Basic auth (email:token).
+// Both classic and scoped Atlassian API tokens use Basic auth (email:token).
+// Bearer is NOT used — the api.atlassian.com URL uses Basic auth too.
 func setAuth(req *http.Request, base, email, token string) {
-	if strings.Contains(base, "api.atlassian.com") {
-		req.Header.Set("Authorization", "Bearer "+token)
-	} else if email != "" && token != "" {
+	if email != "" && token != "" {
 		auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
 		req.Header.Set("Authorization", "Basic "+auth)
 	}
