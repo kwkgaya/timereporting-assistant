@@ -73,7 +73,7 @@ Filename: "{app}\tray.exe"; \
 ; on first run (no config yet). Launched after tray so the tray is ready.
 Filename: "{app}\timeporting.exe"; \
   Description: "Open setup wizard now"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait postinstall skipifsilent runhidden
 
 [UninstallRun]
 ; Silently terminate all app processes before files are deleted.
