@@ -1088,7 +1088,6 @@ const githubGuideHTML = `<!doctype html>
 </main>
 </body></html>`
 
-
 // wizardHTML is the first-run setup wizard.
 const wizardHTML = `<!doctype html>
 <html lang="en"><head>
