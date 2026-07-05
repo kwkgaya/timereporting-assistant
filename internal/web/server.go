@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
 	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
+	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /wizard", s.handleWizard)
@@ -383,6 +384,13 @@ func validateJiraToken(baseURL, email, token string) error {
 	c := jira.NewClient(baseURL, email, token)
 	_, err := c.SearchIssues("order by created DESC")
 	return err
+}
+
+// handleFavicon serves the app icon as a favicon (PNG format, accepted by all modern browsers).
+func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(faviconPNG)
 }
 
 // handleWizard serves the first-run setup wizard.

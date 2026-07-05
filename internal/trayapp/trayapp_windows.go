@@ -5,13 +5,10 @@
 package trayapp
 
 import (
-	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +23,9 @@ import (
 
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
 )
+
+//go:embed assets/icon.png
+var appIconPNG []byte
 
 const (
 	autoStartKey  = `Software\Microsoft\Windows\CurrentVersion\Run`
@@ -294,44 +294,9 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 
 // ── Icon ──────────────────────────────────────────────────────────────────────
 
-// setIcon generates and sets a valid tray icon using stdlib image/png —
-// no external asset files required. Replace with go:embed + a real .ico
-// for a branded icon.
+// setIcon sets the tray icon from the embedded PNG asset.
 func setIcon() {
-	systray.SetIcon(generateIcon())
-}
-
-// generateIcon creates a valid 16×16 RGBA PNG: Jira-blue background with a
-// white "T" (for Timereporting) drawn as a simple pixel pattern.
-func generateIcon() []byte {
-	const size = 16
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	bg := color.RGBA{R: 0, G: 82, B: 204, A: 255}    // #0052cc — Jira blue
-	fg := color.RGBA{R: 255, G: 255, B: 255, A: 255} // white
-
-	// Fill background.
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			img.Set(x, y, bg)
-		}
-	}
-	// Draw white "T": horizontal bar at y=3–4, vertical stem at x=7–8.
-	for x := 3; x <= 12; x++ {
-		img.Set(x, 3, fg)
-		img.Set(x, 4, fg)
-	}
-	for y := 3; y <= 13; y++ {
-		img.Set(7, y, fg)
-		img.Set(8, y, fg)
-	}
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		// Fallback: 1×1 transparent PNG — always valid.
-		tiny := image.NewRGBA(image.Rect(0, 0, 1, 1))
-		_ = png.Encode(&buf, tiny)
-	}
-	return buf.Bytes()
+	systray.SetIcon(appIconPNG)
 }
 
 // openBrowser opens url in the default browser.
