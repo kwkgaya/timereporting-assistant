@@ -1720,13 +1720,14 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 <header>
   <h1>Timereporting Assistant</h1>
   <span id="target-badge" class="badge">loading…</span>
-  <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
-    <label for="write-target" style="font-size:.8rem">Submit to:</label>
-    <select id="write-target" onchange="setWriteTarget(this.value)" style="font-size:.8rem">
-      <option value="mock">Mock Jira</option>
-      <option value="real">Real Jira</option>
-    </select>
-    <a href="/settings" style="color:#fff;font-size:.8rem;margin-left:8px;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:10px">
+    <label id="target-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:.85rem;user-select:none"
+           title="Toggle between Mock Jira (safe) and Real Jira (writes to your timesheet)">
+      <input type="checkbox" id="real-jira-chk" onchange="onTargetCheckbox(this.checked)"
+             style="width:16px;height:16px;cursor:pointer">
+      <span id="target-chk-label" style="font-weight:600">Submit to: Mock Jira</span>
+    </label>
+    <a href="/settings" style="color:#fff;font-size:.8rem;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
   </span>
 </header>
 <main>
@@ -2011,26 +2012,43 @@ async function refreshBadge() {
   const status = await api('GET','/status');
   const badge = document.getElementById('target-badge');
   badge.textContent = 'Read: ' + status.read + ' | Write: ' + status.write;
-  badge.style.background = status.activeWrite === 'real' ? '#de350b' : '#0747a6';
-  const sel = document.getElementById('write-target');
-  sel.value = status.activeWrite;
-  // Disable the Real option when no credentials are available.
-  sel.querySelector('option[value="real"]').disabled = !status.realAvailable;
+  const isReal = status.activeWrite === 'real';
+  badge.style.background = isReal ? '#de350b' : '#0747a6';
+  // Sync checkbox + label
+  const chk = document.getElementById('real-jira-chk');
+  const lbl = document.getElementById('target-chk-label');
+  chk.checked = isReal;
+  chk.disabled = !status.realAvailable;
+  if (isReal) {
+    lbl.textContent = '⚠ Submit to: Real Jira';
+    lbl.style.color = '#ffebe6';
+  } else {
+    lbl.textContent = 'Submit to: Mock Jira';
+    lbl.style.color = '#fff';
+  }
 }
 
-async function setWriteTarget(target) {
-  if (target === 'real' && !confirm('Submit worklogs to REAL Jira? This writes to your actual timesheet.')) {
-    await refreshBadge();
+async function onTargetCheckbox(checked) {
+  const target = checked ? 'real' : 'mock';
+  if (checked && !confirm('⚠ Switch to REAL Jira?\n\nWorklogs will be written to your actual timesheet. Make sure you have reviewed the day plans carefully before submitting.')) {
+    await refreshBadge(); // revert checkbox
     return;
   }
   try {
     await api('PUT','/target',{target});
     await refreshBadge();
-    toast('Submit target set to ' + (target==='real'?'Real Jira':'Mock Jira') + '.');
+    toast('Submit target set to ' + (checked ? '⚠ Real Jira' : 'Mock Jira') + '.');
   } catch(e) {
     toast(e.message, true);
-    await refreshBadge();
+    await refreshBadge(); // revert on error
   }
+}
+
+async function setWriteTarget(target) {
+  // kept for backward compatibility; delegates to checkbox handler
+  const checked = target === 'real';
+  document.getElementById('real-jira-chk').checked = checked;
+  await onTargetCheckbox(checked);
 }
 
 async function init() {
