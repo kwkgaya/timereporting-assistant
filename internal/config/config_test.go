@@ -80,6 +80,7 @@ func TestValidate(t *testing.T) {
 
 func TestRequireRealJira(t *testing.T) {
 	cfg := Default()
+	cfg.Jira.BaseURL = "https://x.atlassian.net"
 	cfg.Jira.Email = "a@b.c"
 	cfg.JiraAPIToken = ""
 	if err := cfg.RequireRealJira(); err == nil {

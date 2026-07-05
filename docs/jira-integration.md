@@ -9,8 +9,8 @@
 ## Detail (for AI agents / implementers)
 
 ### The Jira instance
-- **Base URL:** `https://application.jira.elementlogic.no`
-- **Deployment:** Jira **Cloud** on a custom domain (confirmed via `/rest/api/3/serverInfo` →
+- **Base URL:** your Jira Cloud base URL (e.g. `https://your-domain.atlassian.net`), set in local config.
+- **Deployment:** Jira **Cloud** (may be on a custom domain; confirm via `/rest/api/3/serverInfo` →
   `deploymentType: "Cloud"`). Use **REST API v3**.
 - **Auth:** HTTP Basic with `email:api_token` (base64). Comments use ADF (see `internal/adf`).
 
@@ -34,8 +34,8 @@ Worklogs are then filtered locally by author email + date and grouped by day.
 - **Storage:** Windows Credential Manager, target name `timereporting-assistant/jira`
   (`internal/keychain`). On non-Windows, fall back to env vars `JIRA_EMAIL` + `JIRA_API_TOKEN`.
 - **Never** store the token in `config.json` or the repo.
-- The company (Element Logic) allows classic API tokens freely and already permits API-based
-  Jira integration (the user has done GitHub→Jira field updates via API).
+- The organization allows classic API tokens freely and already permits API-based
+  Jira integration (e.g. GitHub→Jira field updates via API).
 
 ### Guided setup (implemented, [#14])
 `timeporting credentials` (or automatic trigger when no credential is found) walks the user

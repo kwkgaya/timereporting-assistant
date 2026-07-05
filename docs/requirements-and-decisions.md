@@ -24,7 +24,7 @@ Every item below is a **locked decision** made with the user. Do not silently ch
 - **Top-up:** worklogs already present in Jira for a day **count toward** the 7h; the tool only
   adds the difference. Never double-log.
 
-### Special tasks (Element Logic Jira)
+### Special tasks (example keys; set to your own)
 - **Meeting task:** `EDB-9071`
 - **Leave / holiday / absence task:** `EDB-9070`
 

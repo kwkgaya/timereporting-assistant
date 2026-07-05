@@ -1,7 +1,7 @@
 {
   "jira": {
-    "baseUrl": "https://application.jira.elementlogic.no",
-    "email": "you@elementlogic.no"
+    "baseUrl": "https://your-domain.atlassian.net",
+    "email": "you@example.com"
   },
   "meetingIssueKey": "EDB-9071",
   "leaveIssueKey": "EDB-9070",
@@ -15,7 +15,7 @@
     "C:/path/to/work/repo-two"
   ],
   "gitAuthors": [
-    "you@elementlogic.no"
+    "you@example.com"
   ],
   "icsPath": "data/calendar.ics",
   "mockJiraPort": 8099,

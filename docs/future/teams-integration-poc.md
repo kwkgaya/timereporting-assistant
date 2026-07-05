@@ -17,7 +17,7 @@
 - **Calendar** (`Calendars.Read`) is often user-consentable.
 - **Teams messages** (`Chat.Read`, `ChannelMessage.Read.All`) typically require **admin** consent
   and are treated as protected/metered APIs.
-- The user **cannot register an app** in the Element Logic tenant, so anything Graph-based is
+- The user **cannot register an app** in the organization's Entra tenant, so anything Graph-based is
   blocked without IT involvement.
 
 ### v1 decision (locked)
@@ -67,7 +67,7 @@ and only have to trust that one app.
 ### Possible zero-admin workaround (unverified)
 Some tenants allow a **user** to self-request their own Microsoft 365 data export
 (privacy/GDPR export), producing parseable files of their own Teams chats — no admin app needed.
-Whether Element Logic permits user self-service is **unconfirmed**; treat as "investigate, don't
+Whether the organization permits user self-service is **unconfirmed**; treat as "investigate, don't
 assume." If viable, it would be parsed like the ICS file.
 
 ### Alternative future auth (also parked)

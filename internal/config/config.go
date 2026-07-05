@@ -60,7 +60,7 @@ type Config struct {
 // Default returns a config with sensible defaults for the MVP.
 func Default() Config {
 	return Config{
-		Jira:            JiraConfig{BaseURL: "https://application.jira.elementlogic.no"},
+		Jira:            JiraConfig{},
 		MeetingIssueKey: "EDB-9071",
 		LeaveIssueKey:   "EDB-9070",
 		WorkdayHours:    7,

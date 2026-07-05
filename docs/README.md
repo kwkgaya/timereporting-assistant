@@ -43,7 +43,7 @@ anything touches the real system. Your real Jira stays read-only until you expli
 
 - **Repository:** https://github.com/kwkgaya/timereporting-assistant
 - **Issue tracker / milestone:** https://github.com/kwkgaya/timereporting-assistant/milestones
-- **Jira (Element Logic):** https://application.jira.elementlogic.no
+- **Jira:** your organization's Jira Cloud instance (configured locally)
 
 ---
 

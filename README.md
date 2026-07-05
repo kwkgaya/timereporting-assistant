@@ -54,9 +54,29 @@ environment, never from the file:
 ## Safety
 
 - Real Jira is **read-only** until you explicitly set `"target": "real"` and confirm.
-- Secrets are read from environment variables and are never written to the repo.
+- Secrets are read from the OS keychain or environment variables and are never written to the repo.
 - All write testing goes to the mock server.
+
+## Privacy policy
+
+This program does not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. Specifically, it communicates only
+with the Jira and GitHub endpoints **you** configure (or the bundled local mock Jira), using
+credentials **you** provide, which are stored in your OS keychain / environment — never transmitted
+elsewhere and never committed to this repository.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- **Committers and reviewers:** repository maintainers ([@kwkgaya](https://github.com/kwkgaya)).
+- **Approvers:** repository owner ([@kwkgaya](https://github.com/kwkgaya)).
+
+Every signed release is built by the project's CI from source in this repository and manually
+approved for signing.
 
 ## License
 
 MIT
+
