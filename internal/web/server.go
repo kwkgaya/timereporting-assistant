@@ -28,12 +28,13 @@ type DayView struct {
 
 // WlogView is a single worklog row in the UI.
 type WlogView struct {
-	ID       string `json:"id"`       // Jira worklog ID (for existing worklogs)
-	IssueKey string `json:"issueKey"`
-	Minutes  int    `json:"minutes"`
-	Comment  string `json:"comment"`
-	Category string `json:"category"`
-	Author   string `json:"author,omitempty"`
+	ID        string `json:"id"`                  // Jira worklog ID (for existing worklogs)
+	IssueKey  string `json:"issueKey"`
+	Minutes   int    `json:"minutes"`
+	Comment   string `json:"comment"`
+	Category  string `json:"category"`
+	Author    string `json:"author,omitempty"`
+	Submitted bool   `json:"submitted,omitempty"` // true once individually submitted
 }
 
 // Server holds the state for the web review session.
@@ -95,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/days/{date}", s.apiGetDay)
 	mux.HandleFunc("PUT /api/days/{date}", s.apiPutDay)
 	mux.HandleFunc("POST /api/days/{date}/submit", s.apiSubmitDay)
+	mux.HandleFunc("POST /api/days/{date}/rows/{idx}/submit", s.apiSubmitRow)
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
 	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
@@ -411,6 +413,66 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiClonePrevious copies the previous business day's suggested worklogs onto this day.
+// apiSubmitRow submits a single suggested worklog row by its 0-based index.
+func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
+	date := r.PathValue("date")
+	rowIdxStr := r.PathValue("idx")
+	var rowIdx int
+	if _, err := fmt.Sscanf(rowIdxStr, "%d", &rowIdx); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid row index")
+		return
+	}
+
+	s.mu.Lock()
+	idx, ok := s.dayIndex[date]
+	s.mu.Unlock()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "date not found: "+date)
+		return
+	}
+
+	s.mu.Lock()
+	if rowIdx < 0 || rowIdx >= len(s.days[idx].Suggested) {
+		s.mu.Unlock()
+		writeErr(w, http.StatusBadRequest, "row index out of range")
+		return
+	}
+	wl := s.days[idx].Suggested[rowIdx]
+	s.mu.Unlock()
+
+	if wl.Submitted {
+		writeErr(w, http.StatusConflict, "row already submitted")
+		return
+	}
+	if wl.IssueKey == "" || wl.Minutes <= 0 {
+		writeErr(w, http.StatusBadRequest, "row has no issue key or zero minutes")
+		return
+	}
+
+	day, _ := time.Parse("2006-01-02", date)
+	started := model.WorklogStart(day)
+
+	s.mu.Lock()
+	client, writeLabel, cerr := s.writeClient()
+	s.mu.Unlock()
+	if cerr != nil {
+		writeErr(w, http.StatusBadRequest, cerr.Error())
+		return
+	}
+
+	if _, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("submit row: %v", err))
+		return
+	}
+
+	s.mu.Lock()
+	s.days[idx].Suggested[rowIdx].Submitted = true
+	d := s.days[idx]
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"day": d, "target": writeLabel})
+}
+
 func (s *Server) apiClonePrevious(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 	s.mu.Lock()
@@ -656,14 +718,16 @@ function renderDetail(day) {
 
   // Suggested worklogs (editable)
   html += '<strong>Suggested worklogs</strong>';
-  html += '<table id="sugg-table"><tr><th>Issue key</th><th>Time (min)</th><th>Comment</th><th></th></tr>';
+  html += '<table id="sugg-table"><tr><th>Issue key</th><th>Time (min)</th><th>Comment</th><th></th><th></th></tr>';
   (day.suggested||[]).forEach((w,i) => {
     const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
-    html += '<tr class="'+rowCls+'">'
-      +'<td><input type="text" value="'+esc(w.issueKey)+'" onchange="editRow(\''+day.date+'\','+i+',\'issueKey\',this.value)"></td>'
-      +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" onchange="editRow(\''+day.date+'\','+i+',\'minutes\',+this.value)"></td>'
-      +'<td><input type="text" value="'+esc(w.comment)+'" onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
-      +'<td><button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button></td>'
+    const submitted = w.submitted;
+    html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
+      +'<td><input type="text" value="'+esc(w.issueKey)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'issueKey\',this.value)"></td>'
+      +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'minutes\',+this.value)"></td>'
+      +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
+      +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
+      +'<td>'+(submitted?'':' <button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
       +'</tr>';
   });
   if (!day.suggested || day.suggested.length===0) {
@@ -760,6 +824,17 @@ async function clonePrev(date) {
     renderDetail(updated);
     renderList();
     toast('Cloned from previous day.');
+  } catch(e) { toast(e.message, true); }
+}
+
+async function submitRow(date, rowIdx) {
+  try {
+    const res = await api('POST','/days/'+date+'/rows/'+rowIdx+'/submit');
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i] = res.day;
+    renderDetail(res.day);
+    renderList();
+    toast('Row submitted to '+res.target+'.');
   } catch(e) { toast(e.message, true); }
 }
 
