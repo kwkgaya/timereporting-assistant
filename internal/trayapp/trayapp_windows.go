@@ -306,7 +306,7 @@ func setIcon() {
 func generateIcon() []byte {
 	const size = 16
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	bg := color.RGBA{R: 0, G: 82, B: 204, A: 255}   // #0052cc — Jira blue
+	bg := color.RGBA{R: 0, G: 82, B: 204, A: 255}    // #0052cc — Jira blue
 	fg := color.RGBA{R: 255, G: 255, B: 255, A: 255} // white
 
 	// Fill background.
@@ -340,4 +340,3 @@ func openBrowser(url string) {
 		_ = exec.Command("cmd", "/c", "start", "", url).Start()
 	}
 }
-

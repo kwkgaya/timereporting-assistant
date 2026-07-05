@@ -44,7 +44,7 @@ Source: "{#DistDir}\timeporting.exe"; DestDir: "{app}"; Flags: ignoreversion; Co
 Source: "{#DistDir}\tray.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "{#DistDir}\mockjira.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: mock
 Source: "{#DistDir}\config.example.json"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme; Components: core
+Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 
 [Icons]
 Name: "{group}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Comment: "Review and submit your time reports"

@@ -353,4 +353,3 @@ func appDataDir() string {
 	}
 	return "."
 }
-
