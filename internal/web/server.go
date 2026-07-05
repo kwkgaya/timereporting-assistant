@@ -1180,14 +1180,14 @@ a{color:#0052cc}
 <div class="card" id="step-3" style="display:none">
   <div class="step-label">Step 3 of 6</div>
   <h2>Jira API token</h2>
-  <p class="subtitle">You need a <strong>Classic API token</strong> — not the newer "API token with scopes". Classic tokens use the same authentication method this app is built for.
-  <a href="/guide/jira-token" target="_blank">How to create one →</a></p>
+  <p class="subtitle">The tool needs an API token to read and write your Jira worklogs. Both <strong>Classic</strong> and <strong>Scoped</strong> tokens are supported.</p>
+  <p style="margin:0 0 10px"><a href="/guide/jira-token" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to create a Jira API token →</a></p>
   <p style="font-size:.82rem;background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:8px 12px;margin-bottom:12px">
     ⚠ The email must be your <strong>Atlassian account email</strong> — check it at
     <a href="https://id.atlassian.com/manage-profile" target="_blank">id.atlassian.com/manage-profile</a>.
     It may differ from your work email.
   </p>
-  <label>Scoped API token *</label>
+  <label>API token *</label>
   <div class="input-row">
     <input type="password" id="w-jiraToken" placeholder="Paste token here" oninput="clearErr('err-3')">
     <button class="show-btn" onclick="togglePwd('w-jiraToken',this)">Show</button>
@@ -1203,7 +1203,8 @@ a{color:#0052cc}
   <div class="step-label">Step 4 of 6</div>
   <h2>GitHub activity <span style="font-size:.8rem;font-weight:400;color:#6b778c">(optional)</span></h2>
   <p class="subtitle">Scan your commits and PRs to detect which Jira tasks you worked on.
-  Skip if you only use local repos. <a href="/guide/github-token" target="_blank">How to create a token →</a></p>
+  Skip if you only use local repos.</p>
+  <p style="margin:0 0 14px"><a href="/guide/github-token" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to create a GitHub token →</a></p>
   <label>GitHub username</label>
   <input type="text" id="w-ghUser" placeholder="your-work-github-username">
   <label>GitHub token</label>
