@@ -234,7 +234,9 @@ func (g *GitCollector) groupByOrigin() map[string][]string {
 
 // remoteURL returns the fetch URL of the "origin" remote, or "" on failure.
 func (g *GitCollector) remoteURL(repoPath string) string {
-	out, err := exec.Command(g.gitBin, "-C", repoPath, "remote", "get-url", "origin").Output()
+	cmd := exec.Command(g.gitBin, "-C", repoPath, "remote", "get-url", "origin")
+	hideCmd(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -258,7 +260,9 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		args = append(args, "--author="+author)
 	}
 
-	out, err := exec.Command(g.gitBin, args...).Output()
+	cmd := exec.Command(g.gitBin, args...)
+	hideCmd(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -319,7 +323,9 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		args = append(args, "--author="+a)
 	}
 
-	out, err := exec.Command(g.gitBin, args...).Output()
+	cmd := exec.Command(g.gitBin, args...)
+	hideCmd(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}

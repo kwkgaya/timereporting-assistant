@@ -201,17 +201,37 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.cfg.Jira.BaseURL = v.JiraBaseURL
-	s.cfg.Jira.Email = v.JiraEmail
-	s.cfg.MeetingIssueKey = v.MeetingKey
-	s.cfg.LeaveIssueKey = v.LeaveKey
+	// Preserve existing values when the incoming field is empty. This lets the
+	// wizard's final step send a partial config (repos/ICS/ports only) without
+	// wiping the Jira URL/email/keys set in earlier steps.
+	if v.JiraBaseURL != "" {
+		s.cfg.Jira.BaseURL = v.JiraBaseURL
+	}
+	if v.JiraEmail != "" {
+		s.cfg.Jira.Email = v.JiraEmail
+	}
+	if v.MeetingKey != "" {
+		s.cfg.MeetingIssueKey = v.MeetingKey
+	}
+	if v.LeaveKey != "" {
+		s.cfg.LeaveIssueKey = v.LeaveKey
+	}
 	if v.WorkdayHours > 0 {
 		s.cfg.WorkdayHours = v.WorkdayHours
 	}
-	s.cfg.LocalRepos = v.LocalRepos
-	s.cfg.GitAuthors = v.GitAuthors
-	s.cfg.GitHub.Username = v.GitHubUsername
-	s.cfg.ICSPath = v.ICSPath
+	// Lists and paths are set explicitly (may legitimately be cleared).
+	if v.LocalRepos != nil {
+		s.cfg.LocalRepos = v.LocalRepos
+	}
+	if v.GitAuthors != nil {
+		s.cfg.GitAuthors = v.GitAuthors
+	}
+	if v.GitHubUsername != "" {
+		s.cfg.GitHub.Username = v.GitHubUsername
+	}
+	if v.ICSPath != "" {
+		s.cfg.ICSPath = v.ICSPath
+	}
 	if v.MockJiraPort > 0 {
 		s.cfg.MockJiraPort = v.MockJiraPort
 	}
@@ -1413,6 +1433,25 @@ async function uploadICS(input, targetId) {
   input.value = '';
 }
 
+// Pre-fill fields from any existing config so returning users don't retype.
+async function prefill(){
+  try{
+    const c=await api('GET','/config');
+    const set=(id,val)=>{if(val)document.getElementById(id).value=val;};
+    set('w-jiraBaseUrl',c.jiraBaseUrl);
+    set('w-jiraEmail',c.jiraEmail);
+    set('w-meetingKey',c.meetingKey);
+    set('w-leaveKey',c.leaveKey);
+    set('w-ghUser',c.githubUsername);
+    if(c.localRepos&&c.localRepos.length)document.getElementById('w-repos').value=c.localRepos.join('\n');
+    if(c.gitAuthors&&c.gitAuthors.length)document.getElementById('w-authors').value=c.gitAuthors.join(', ');
+    set('w-ics',c.icsPath);
+    if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
+    if(c.mockJiraPort)document.getElementById('w-mockPort').value=c.mockJiraPort;
+  }catch(e){/* first run: nothing to pre-fill */}
+}
+
+prefill();
 goTo(1);
 </script>
 </body></html>`
