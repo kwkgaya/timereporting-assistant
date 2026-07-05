@@ -5,15 +5,19 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/kwkgaya/timereporting-assistant/internal/keychain"
 )
 
 // Target selects where worklogs are submitted.
 const (
-	TargetMock = "mock"
-	TargetReal = "real"
+	TargetMock      = "mock"
+	TargetMockWrite = "mock-write" // read from real Jira, write to mock
+	TargetReal      = "real"
 )
 
 // Environment variable names for secrets.
@@ -67,8 +71,9 @@ func Default() Config {
 	}
 }
 
-// Load reads the JSON config at path (may be empty to use defaults only) and
-// then overlays secrets from the environment.
+// Load reads the JSON config at path (may be empty to use defaults only),
+// then overlays secrets from the OS keychain (Windows Credential Manager),
+// falling back to environment variables when the keychain has no entry.
 func Load(path string) (Config, error) {
 	cfg := Default()
 	if path != "" {
@@ -80,8 +85,27 @@ func Load(path string) (Config, error) {
 			return cfg, fmt.Errorf("parse config %q: %w", path, err)
 		}
 	}
-	cfg.JiraAPIToken = os.Getenv(EnvJiraToken)
-	cfg.GitHubToken = os.Getenv(EnvGitHubToken)
+
+	// Jira credentials: keychain → env var.
+	if cred, err := keychain.Load(keychain.JiraTarget); err == nil {
+		if cfg.Jira.Email == "" {
+			cfg.Jira.Email = cred.Username
+		}
+		cfg.JiraAPIToken = cred.Secret
+	} else if !errors.Is(err, keychain.ErrNotFound) {
+		// Unexpected error reading keychain — fall through to env var silently.
+		cfg.JiraAPIToken = os.Getenv(EnvJiraToken)
+	} else {
+		cfg.JiraAPIToken = os.Getenv(EnvJiraToken)
+	}
+
+	// GitHub token: keychain → env var.
+	if cred, err := keychain.Load(keychain.GitHubTarget); err == nil {
+		cfg.GitHubToken = cred.Secret
+	} else {
+		cfg.GitHubToken = os.Getenv(EnvGitHubToken)
+	}
+
 	if cfg.Target == "" {
 		cfg.Target = TargetMock
 	}
@@ -89,8 +113,6 @@ func Load(path string) (Config, error) {
 }
 
 // Validate checks that the fields required for building day plans are present.
-// It does not require real-Jira/GitHub secrets, since the MVP can run entirely
-// against the mock server.
 func (c Config) Validate() error {
 	var missing []string
 	if c.MeetingIssueKey == "" {
@@ -102,13 +124,23 @@ func (c Config) Validate() error {
 	if c.WorkdayHours <= 0 {
 		missing = append(missing, "workdayHours (> 0)")
 	}
-	if c.Target != TargetMock && c.Target != TargetReal {
-		missing = append(missing, `target ("mock" or "real")`)
+	if c.Target != TargetMock && c.Target != TargetMockWrite && c.Target != TargetReal {
+		missing = append(missing, `target ("mock", "mock-write", or "real")`)
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("invalid config: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// NeedsRealJiraRead returns true when the target requires reading from real Jira.
+func (c Config) NeedsRealJiraRead() bool {
+	return c.Target == TargetMockWrite || c.Target == TargetReal
+}
+
+// NeedsRealJiraWrite returns true when the target writes to real Jira.
+func (c Config) NeedsRealJiraWrite() bool {
+	return c.Target == TargetReal
 }
 
 // RequireRealJira validates the settings needed to talk to real Jira.

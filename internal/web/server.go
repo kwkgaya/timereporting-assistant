@@ -36,22 +36,25 @@ type WlogView struct {
 
 // Server holds the state for the web review session.
 type Server struct {
-	mu         sync.Mutex
-	days       []DayView      // ordered by date
-	dayIndex   map[string]int // date -> index
-	jiraClient *jira.Client
-	target     string // "mock" or "real"
-	port       int
+	mu          sync.Mutex
+	days        []DayView      // ordered by date
+	dayIndex    map[string]int // date -> index
+	jiraClient  *jira.Client   // write target
+	readTarget  string         // display label: "mock" / "real Jira"
+	writeTarget string         // display label: "mock" / "real Jira"
+	port        int
 }
 
 // New creates a Server. client targets either the mock or real Jira depending
-// on target ("mock"/"real"). Days is the ordered list of day plans to review.
+// on target ("mock"/"mock-write"/"real"). Days is the ordered list of day plans to review.
 func New(plans []model.DayPlan, client *jira.Client, target string, port int) *Server {
+	read, write := targetLabels(target)
 	s := &Server{
-		dayIndex:   map[string]int{},
-		jiraClient: client,
-		target:     target,
-		port:       port,
+		dayIndex:    map[string]int{},
+		jiraClient:  client,
+		readTarget:  read,
+		writeTarget: write,
+		port:        port,
 	}
 	for _, p := range plans {
 		key := p.Date.Format("2006-01-02")
@@ -65,6 +68,7 @@ func New(plans []model.DayPlan, client *jira.Client, target string, port int) *S
 // Handler returns the HTTP handler for the review UI.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/status", s.apiStatus)
 	mux.HandleFunc("GET /api/days", s.apiGetDays)
 	mux.HandleFunc("GET /api/days/{date}", s.apiGetDay)
 	mux.HandleFunc("PUT /api/days/{date}", s.apiPutDay)
@@ -72,6 +76,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
+}
+
+func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	r, wt := s.readTarget, s.writeTarget
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"read": r, "write": wt})
+}
+
+// targetLabels returns human-readable read/write labels for a target string.
+func targetLabels(target string) (read, write string) {
+	switch target {
+	case "real":
+		return "Real Jira", "Real Jira"
+	case "mock-write":
+		return "Real Jira", "Mock Jira"
+	default: // "mock"
+		return "Mock Jira", "Mock Jira"
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -196,7 +219,7 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"submitted": submitted,
 		"dryRun":    body.DryRun,
-		"target":    s.target,
+		"target":    s.writeTarget,
 	})
 }
 
@@ -540,12 +563,15 @@ async function refresh(date) {
 
 async function init() {
   try {
-    days = await api('GET','/days');
+    const status = await api('GET','/status');
     const badge = document.getElementById('target-badge');
-    if (days.length) {
-      // Detect target from a future submit; show from first day's label.
-      badge.textContent = 'READY';
+    if (status.read === status.write) {
+      badge.textContent = '→ ' + status.write;
+    } else {
+      badge.textContent = 'Read: ' + status.read + ' | Write: ' + status.write;
     }
+    if (status.write === 'Real Jira') badge.style.background = '#de350b';
+    days = await api('GET','/days');
     renderList();
     if (days.length) selectDay(days[0].date);
   } catch(e) { toast('Failed to load days: '+e.message, true); }
