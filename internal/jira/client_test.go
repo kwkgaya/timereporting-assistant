@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kwkgaya/timeporting-assistant/internal/mockjira"
-	"github.com/kwkgaya/timeporting-assistant/internal/model"
+	"github.com/kwkgaya/timereporting-assistant/internal/mockjira"
+	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
 
 func newTestClient(t *testing.T) (*Client, *mockjira.Server, func()) {

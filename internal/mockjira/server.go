@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/kwkgaya/timeporting-assistant/internal/adf"
+	"github.com/kwkgaya/timereporting-assistant/internal/adf"
 )
 
 // Author identifies who logged work.

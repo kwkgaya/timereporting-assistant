@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/kwkgaya/timeporting-assistant/internal/mockjira"
+	"github.com/kwkgaya/timereporting-assistant/internal/mockjira"
 )
 
 func main() {

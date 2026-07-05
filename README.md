@@ -1,4 +1,4 @@
-# timeporting-assistant
+# timereporting-assistant
 
 Backfill and auto-generate your **Jira Cloud** worklogs from your **GitHub activity** and
 **calendar meetings** (from an exported `.ics` file), review them in a small local web UI, and

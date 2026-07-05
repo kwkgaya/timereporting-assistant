@@ -1,3 +1,3 @@
-module github.com/kwkgaya/timeporting-assistant
+module github.com/kwkgaya/timereporting-assistant
 
 go 1.26.2

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kwkgaya/timeporting-assistant/internal/adf"
+	"github.com/kwkgaya/timereporting-assistant/internal/adf"
 )
 
 func TestAddAndListWorklog(t *testing.T) {

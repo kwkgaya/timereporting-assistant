@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kwkgaya/timeporting-assistant/internal/adf"
-	"github.com/kwkgaya/timeporting-assistant/internal/model"
+	"github.com/kwkgaya/timereporting-assistant/internal/adf"
+	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
 
 // WorklogMarker is appended to comments this tool writes, so re-runs can detect
