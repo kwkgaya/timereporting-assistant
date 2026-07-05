@@ -156,6 +156,7 @@ func (c *Client) ListWorklogs(key string) ([]model.Worklog, error) {
 	for _, w := range wire.Worklogs {
 		started, _ := time.Parse(jiraTimeLayout, w.Started)
 		out = append(out, model.Worklog{
+			ID:       w.ID,
 			IssueKey: key,
 			Minutes:  w.TimeSpentSeconds / 60,
 			Comment:  adf.Text(w.Comment),
@@ -232,3 +233,25 @@ func (c *Client) ExistingWorklogsByDay(authorEmail string, start, end time.Time)
 	}
 	return result, nil
 }
+
+// UpdateWorklog updates an existing worklog's duration, start time, and comment.
+func (c *Client) UpdateWorklog(issueKey, worklogID string, minutes int, started time.Time, comment string) error {
+	body := map[string]any{
+		"timeSpentSeconds": minutes * 60,
+		"started":          started.UTC().Format(jiraTimeLayout),
+	}
+	if comment != "" {
+		body["comment"] = adf.Doc(comment)
+	}
+	path := "/rest/api/3/issue/" + url.PathEscape(issueKey) + "/worklog/" + url.PathEscape(worklogID)
+	_, err := c.do(http.MethodPut, path, body)
+	return err
+}
+
+// DeleteWorklog removes a worklog by ID from an issue.
+func (c *Client) DeleteWorklog(issueKey, worklogID string) error {
+	path := "/rest/api/3/issue/" + url.PathEscape(issueKey) + "/worklog/" + url.PathEscape(worklogID)
+	_, err := c.do(http.MethodDelete, path, nil)
+	return err
+}
+

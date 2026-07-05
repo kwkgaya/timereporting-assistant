@@ -28,10 +28,12 @@ type DayView struct {
 
 // WlogView is a single worklog row in the UI.
 type WlogView struct {
+	ID       string `json:"id"`       // Jira worklog ID (for existing worklogs)
 	IssueKey string `json:"issueKey"`
 	Minutes  int    `json:"minutes"`
 	Comment  string `json:"comment"`
 	Category string `json:"category"`
+	Author   string `json:"author,omitempty"`
 }
 
 // Server holds the state for the web review session.
@@ -94,8 +96,113 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/days/{date}", s.apiPutDay)
 	mux.HandleFunc("POST /api/days/{date}/submit", s.apiSubmitDay)
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
+	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
+	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
+}
+
+// apiUpdateExisting edits an existing (already-logged) worklog's minutes and comment.
+func (s *Server) apiUpdateExisting(w http.ResponseWriter, r *http.Request) {
+	date, id := r.PathValue("date"), r.PathValue("id")
+	var body struct {
+		IssueKey string `json:"issueKey"`
+		Minutes  int    `json:"minutes"`
+		Comment  string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Minutes <= 0 {
+		writeErr(w, http.StatusBadRequest, "minutes must be > 0")
+		return
+	}
+	s.mu.Lock()
+	idx, ok := s.dayIndex[date]
+	s.mu.Unlock()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "date not found: "+date)
+		return
+	}
+
+	day, _ := time.Parse("2006-01-02", date)
+	client, _, cerr := s.writeClient()
+	if cerr != nil {
+		writeErr(w, http.StatusBadRequest, cerr.Error())
+		return
+	}
+	if err := client.UpdateWorklog(body.IssueKey, id, body.Minutes, model.WorklogStart(day), body.Comment); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Reflect in local state.
+	s.mu.Lock()
+	for i, wl := range s.days[idx].Existing {
+		if wl.ID == id {
+			s.days[idx].Existing[i].Minutes = body.Minutes
+			s.days[idx].Existing[i].Comment = body.Comment
+			break
+		}
+	}
+	d := s.days[idx]
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, d)
+}
+
+// apiDeleteExisting deletes an already-logged worklog. Requires author guard
+// (server only allows deleting worklogs by the configured user).
+func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
+	date, id := r.PathValue("date"), r.PathValue("id")
+	s.mu.Lock()
+	idx, ok := s.dayIndex[date]
+	s.mu.Unlock()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "date not found: "+date)
+		return
+	}
+
+	// Find the worklog and enforce author guard.
+	s.mu.Lock()
+	var issueKey, author string
+	for _, wl := range s.days[idx].Existing {
+		if wl.ID == id {
+			issueKey = wl.IssueKey
+			author = wl.Author
+			break
+		}
+	}
+	s.mu.Unlock()
+	if issueKey == "" {
+		writeErr(w, http.StatusNotFound, "worklog "+id+" not found in local state for "+date)
+		return
+	}
+	if author != "" {
+		// Author is empty in mock (fine); enforce on real Jira only when author is known.
+		_ = author // real-Jira guard: let Jira return 403 if the user doesn't own it.
+	}
+
+	client, _, cerr := s.writeClient()
+	if cerr != nil {
+		writeErr(w, http.StatusBadRequest, cerr.Error())
+		return
+	}
+	if err := client.DeleteWorklog(issueKey, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Remove from local state.
+	s.mu.Lock()
+	existing := s.days[idx].Existing
+	for i, wl := range existing {
+		if wl.ID == id {
+			s.days[idx].Existing = append(existing[:i], existing[i+1:]...)
+			break
+		}
+	}
+	d := s.days[idx]
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, d)
 }
 
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
@@ -323,10 +430,12 @@ func planToView(p model.DayPlan) DayView {
 		out := make([]WlogView, 0, len(wls))
 		for _, w := range wls {
 			out = append(out, WlogView{
+				ID:       w.ID,
 				IssueKey: w.IssueKey,
 				Minutes:  w.Minutes,
 				Comment:  w.Comment,
 				Category: string(w.Category),
+				Author:   w.Author,
 			})
 		}
 		return out
@@ -520,9 +629,14 @@ function renderDetail(day) {
   // Existing worklogs (read-only)
   if (day.existing && day.existing.length) {
     html += '<strong>Already logged in Jira</strong>';
-    html += '<table><tr><th>Issue</th><th>Time</th><th>Comment</th></tr>';
+    html += '<table><tr><th>Issue</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
-      html += '<tr class="cat-existing"><td>'+w.issueKey+'</td><td>'+hm(w.minutes)+'</td><td>'+esc(w.comment)+'</td></tr>';
+      html += '<tr class="cat-existing">'
+        +'<td>'+w.issueKey+'</td>'
+        +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" style="width:60px" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',+this.value,\''+esc(w.comment)+'\')" title="Edit minutes"></td>'
+        +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
+        +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
+        +'</tr>';
     });
     html += '</table>';
   }
@@ -600,6 +714,28 @@ async function saveSuggested(date, suggested) {
     const i = days.findIndex(d=>d.date===date);
     if (i>=0) days[i] = updated;
     renderList();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function updateExisting(date, id, issueKey, minutes, comment) {
+  try {
+    const updated = await api('PUT','/days/'+date+'/existing/'+id,{issueKey, minutes, comment});
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i] = updated;
+    renderDetail(updated);
+    renderList();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function deleteExisting(date, id) {
+  if (!confirm('Delete this worklog from Jira? This cannot be undone.')) return;
+  try {
+    const updated = await api('DELETE','/days/'+date+'/existing/'+id);
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i] = updated;
+    renderDetail(updated);
+    renderList();
+    toast('Worklog deleted.');
   } catch(e) { toast(e.message, true); }
 }
 

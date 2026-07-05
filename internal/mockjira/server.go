@@ -108,6 +108,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rest/api/3/issue/{key}/worklog", s.handleListWorklog)
 	mux.HandleFunc("POST /rest/api/3/issue/{key}/worklog", s.handleAddWorklog)
+	mux.HandleFunc("PUT /rest/api/3/issue/{key}/worklog/{id}", s.handleUpdateWorklog)
+	mux.HandleFunc("DELETE /rest/api/3/issue/{key}/worklog/{id}", s.handleDeleteWorklog)
 	mux.HandleFunc("GET /rest/api/3/issue/{key}", s.handleGetIssue)
 	mux.HandleFunc("GET /rest/api/3/search", s.handleSearch)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -218,6 +220,70 @@ func (s *Server) handleAddWorklog(w http.ResponseWriter, r *http.Request) {
 		Started:          body.Started,
 		Comment:          body.Comment,
 	})
+}
+
+func (s *Server) handleUpdateWorklog(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	id := r.PathValue("id")
+	if !s.issueExists(key) {
+		writeErr(w, http.StatusNotFound, "Issue does not exist: "+key)
+		return
+	}
+	var body struct {
+		TimeSpentSeconds int             `json:"timeSpentSeconds"`
+		Started          string          `json:"started"`
+		Comment          json.RawMessage `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.TimeSpentSeconds <= 0 {
+		writeErr(w, http.StatusBadRequest, "timeSpentSeconds must be > 0")
+		return
+	}
+	var commentStr sql.NullString
+	if len(body.Comment) > 0 && string(body.Comment) != "null" {
+		commentStr = sql.NullString{String: string(body.Comment), Valid: true}
+	}
+	res, err := s.db.Exec(
+		`UPDATE worklogs SET seconds=?, started=?, comment=? WHERE id=? AND issue_key=?`,
+		body.TimeSpentSeconds, body.Started, commentStr, id, key,
+	)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		writeErr(w, http.StatusNotFound, "Worklog not found: "+id)
+		return
+	}
+	writeJSON(w, http.StatusOK, Worklog{
+		ID:               id,
+		Author:           Author{EmailAddress: s.authorMail, DisplayName: s.authorName},
+		TimeSpentSeconds: body.TimeSpentSeconds,
+		Started:          body.Started,
+		Comment:          body.Comment,
+	})
+}
+
+func (s *Server) handleDeleteWorklog(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	id := r.PathValue("id")
+	if !s.issueExists(key) {
+		writeErr(w, http.StatusNotFound, "Issue does not exist: "+key)
+		return
+	}
+	res, err := s.db.Exec(`DELETE FROM worklogs WHERE id=? AND issue_key=?`, id, key)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		writeErr(w, http.StatusNotFound, "Worklog not found: "+id)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, _ *http.Request) {

@@ -64,6 +64,7 @@ func (m Meeting) Minutes() int {
 
 // Worklog is a single time entry for a day.
 type Worklog struct {
+	ID       string          // Jira worklog ID (set for existing worklogs; empty for suggested)
 	IssueKey string          // may be empty when unassigned
 	Minutes  int             // duration in minutes (multiples of 30 for suggestions)
 	Comment  string          // worklog comment
