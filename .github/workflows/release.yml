@@ -31,6 +31,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           go build -trimpath -ldflags "-s -w -X main.version=$v" -o dist\timeporting.exe .\cmd\timeporting
           go build -trimpath -ldflags "-s -w -X main.version=$v" -o dist\mockjira.exe .\cmd\mockjira
+          go build -trimpath -ldflags "-s -w -X main.version=$v" -o dist\tray.exe .\cmd\tray
           Copy-Item config.example.json dist\
           Copy-Item README.md dist\
 

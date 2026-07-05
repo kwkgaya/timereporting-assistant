@@ -254,4 +254,3 @@ func TestTargetSwitchToRealWithClient(t *testing.T) {
 		t.Errorf("mock target should be untouched, got %d", mockMock.WorklogCount("EDB-100"))
 	}
 }
-

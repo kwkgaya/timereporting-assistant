@@ -38,27 +38,29 @@ Name: "mock"; Description: "Mock Jira server (safe local testing target)"; Types
 
 [Files]
 Source: "{#DistDir}\timeporting.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
+Source: "{#DistDir}\tray.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "{#DistDir}\mockjira.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: mock
 Source: "{#DistDir}\config.example.json"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme; Components: core
 
 [Icons]
 Name: "{group}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Comment: "Review and submit your time reports"
+Name: "{group}\Timereporting Tray"; Filename: "{app}\tray.exe"; Comment: "System-tray companion (also starts automatically at login)"
 Name: "{group}\Mock Jira (inspect)"; Filename: "{app}\mockjira.exe"; Components: mock
 Name: "{group}\Uninstall Timereporting Assistant"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
-Name: "autostart"; Description: "Start Timereporting Assistant when I log in"; Flags: unchecked
+Name: "autostart"; Description: "Start tray app when I log in (recommended)"; Flags: checkedonce
 
 [Registry]
 ; Optional auto-start at login (per-user, no admin).
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; ValueName: "TimereportingAssistant"; \
-  ValueData: """{app}\timeporting.exe"""; \
+  ValueData: """{app}\tray.exe"""; \
   Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\timeporting.exe"; Description: "Launch Timereporting Assistant now"; \
+Filename: "{app}\tray.exe"; Description: "Start tray app now (recommended)"; \
   Flags: nowait postinstall skipifsilent

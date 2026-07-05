@@ -152,9 +152,9 @@ func runMain() {
 		ensureMockRunning(cfg.MockJiraPort)
 	}
 
-	var readClient *jira.Client  // for fetching existing worklogs
-	var mockClient *jira.Client  // always writes to the mock
-	var realClient *jira.Client  // writes to real Jira; nil when no credentials
+	var readClient *jira.Client // for fetching existing worklogs
+	var mockClient *jira.Client // always writes to the mock
+	var realClient *jira.Client // writes to real Jira; nil when no credentials
 
 	mockClient = jira.NewClient(mockBase, "", "")
 	if cfg.Jira.BaseURL != "" && cfg.JiraAPIToken != "" {
@@ -305,4 +305,3 @@ func openURL(url string) {
 	}
 	_ = cmd.Start()
 }
-

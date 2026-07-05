@@ -28,7 +28,7 @@ type DayView struct {
 
 // WlogView is a single worklog row in the UI.
 type WlogView struct {
-	ID        string `json:"id"`                  // Jira worklog ID (for existing worklogs)
+	ID        string `json:"id"` // Jira worklog ID (for existing worklogs)
 	IssueKey  string `json:"issueKey"`
 	Minutes   int    `json:"minutes"`
 	Comment   string `json:"comment"`

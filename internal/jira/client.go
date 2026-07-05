@@ -254,4 +254,3 @@ func (c *Client) DeleteWorklog(issueKey, worklogID string) error {
 	_, err := c.do(http.MethodDelete, path, nil)
 	return err
 }
-
