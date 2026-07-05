@@ -143,6 +143,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
 	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
+	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
+	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
@@ -302,8 +304,9 @@ func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email string `json:"email"`
-		Token string `json:"token"`
+		BaseURL string `json:"baseUrl"`
+		Email   string `json:"email"`
+		Token   string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -313,32 +316,42 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "token required")
 		return
 	}
-	// Validate against Jira.
+	// Use baseUrl from body if provided; fall back to saved config.
 	s.mu.Lock()
-	baseURL := s.cfg.Jira.BaseURL
+	baseURL := body.BaseURL
+	if baseURL == "" {
+		baseURL = s.cfg.Jira.BaseURL
+	}
+	email := body.Email
+	if email == "" {
+		email = s.cfg.Jira.Email
+	}
 	s.mu.Unlock()
 	if baseURL == "" {
-		writeErr(w, http.StatusBadRequest, "set jira.baseUrl in config before saving credentials")
+		writeErr(w, http.StatusBadRequest, "Jira base URL is required — fill it in above")
 		return
 	}
-	testClient := jira.NewClient(baseURL, body.Email, body.Token)
-	if _, err := testClient.GetIssue("EDB-9071"); err != nil {
-		// GetIssue may fail for unknown keys; check /myself instead.
-		if err2 := validateJiraToken(baseURL, body.Email, body.Token); err2 != nil {
-			writeErr(w, http.StatusBadRequest, "token validation failed: "+err2.Error())
-			return
-		}
+	if err := validateJiraToken(baseURL, email, body.Token); err != nil {
+		writeErr(w, http.StatusBadRequest, "token validation failed: "+err.Error())
+		return
 	}
-	if err := keychain.Store(keychain.JiraTarget, body.Email, body.Token); err != nil {
+	if err := keychain.Store(keychain.JiraTarget, email, body.Token); err != nil {
 		writeErr(w, http.StatusInternalServerError, "keychain store: "+err.Error())
 		return
 	}
 	// Update live config + real client.
 	s.mu.Lock()
-	s.cfg.Jira.Email = body.Email
+	s.cfg.Jira.BaseURL = baseURL
+	s.cfg.Jira.Email = email
 	s.cfg.JiraAPIToken = body.Token
-	s.realClient = jira.NewClient(baseURL, body.Email, body.Token)
+	s.realClient = jira.NewClient(baseURL, email, body.Token)
+	cfgPath := s.cfgPath
+	cfg := s.cfg
 	s.mu.Unlock()
+	// Persist so the URL/email are saved too.
+	if cfgPath != "" {
+		_ = saveConfigFile(cfgPath, cfg)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
@@ -369,6 +382,18 @@ func validateJiraToken(baseURL, email, token string) error {
 	c := jira.NewClient(baseURL, email, token)
 	_, err := c.SearchIssues("order by created DESC")
 	return err
+}
+
+// handleJiraGuide serves the Jira API token creation guide.
+func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(buildJiraGuideHTML()))
+}
+
+// handleGitHubGuide serves the GitHub token creation guide.
+func (s *Server) handleGitHubGuide(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(githubGuideHTML))
 }
 
 // handleSettings serves the settings/onboarding page.
@@ -829,11 +854,227 @@ func minutesToHM(m int) string {
 
 var _ = minutesToHM // used in template only
 
-// buildSettingsHTML returns the settings/onboarding HTML with screenshots inlined.
-func buildSettingsHTML() string {
+// guideCSS is shared styling for both guide pages.
+const guideCSS = `
+*{box-sizing:border-box}
+body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#172b4d}
+header{background:#0052cc;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px}
+header h1{margin:0;font-size:1.1rem;font-weight:600}
+header a{color:#fff;text-decoration:none;font-size:.85rem;margin-left:auto;border:1px solid rgba(255,255,255,.4);padding:4px 12px;border-radius:4px}
+header a:hover{background:rgba(255,255,255,.15)}
+main{max-width:820px;margin:24px auto;padding:0 16px}
+section{background:#fff;border:1px solid #dfe1e6;border-radius:4px;padding:20px 24px;margin-bottom:20px}
+h2{font-size:1rem;font-weight:700;margin:0 0 4px}
+.subtitle{font-size:.85rem;color:#42526e;margin:0 0 16px}
+.step{display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-top:1px solid #f4f5f7}
+.step-num{min-width:28px;height:28px;border-radius:50%;background:#0052cc;color:#fff;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0}
+.step-body{flex:1}
+.step-body p{margin:4px 0 8px;font-size:.85rem;color:#42526e}
+.step-body strong{font-size:.9rem}
+.guide-img{max-width:100%;border:1px solid #dfe1e6;border-radius:4px;cursor:pointer}
+.guide-img:hover{box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.scope-box{background:#f8f9ff;border:1px solid #c5d3ff;border-radius:4px;padding:10px 14px;font-size:.85rem}
+.scope-box code{background:#e9f2ff;padding:1px 5px;border-radius:3px}
+code{background:#f4f5f7;padding:1px 5px;border-radius:3px;font-size:.85rem}
+a{color:#0052cc}
+#lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;align-items:center;justify-content:center}
+#lightbox.open{display:flex}
+#lightbox img{max-width:92vw;max-height:88vh;border-radius:4px}
+#lightbox-close{position:absolute;top:16px;right:20px;color:#fff;font-size:1.8rem;cursor:pointer}`
+
+const guideJS = `
+document.querySelectorAll('.guide-img').forEach(img => img.onclick = () => {
+  document.getElementById('lightbox-img').src = img.src;
+  document.getElementById('lightbox').classList.add('open');
+});
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }`
+
+// buildJiraGuideHTML returns the dedicated Jira API token creation guide page.
+func buildJiraGuideHTML() string {
 	img := func(b64, alt string) string {
 		return `<img src="data:image/jpeg;base64,` + b64 + `" alt="` + alt + `" class="guide-img">`
 	}
+	return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create a Jira API token — Timereporting Assistant</title>
+<style>` + guideCSS + `</style></head>
+<body>
+<header>
+  <h1>How to create a Jira API token</h1>
+  <a href="/settings">← Back to Settings</a>
+</header>
+<main>
+<section>
+  <h2>What is this and why do you need it?</h2>
+  <p class="subtitle">
+    The Timereporting Assistant reads your existing Jira worklogs and — after you review and approve — writes new ones on your behalf.
+    To do this securely it needs a <strong>scoped API token</strong>: a password-like key that only gives it permission to read and write worklogs, nothing else.
+    The token is stored in your Windows Credential Manager and never written to any file.
+  </p>
+  <p style="font-size:.85rem;color:#42526e">You need a <strong>scoped token</strong> (not a classic one). The scoped token wizard lets you pick exactly which permissions to grant.</p>
+</section>
+
+<section>
+  <h2>Step-by-step</h2>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <strong>Open the API Tokens page</strong>
+      <p>Go to <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">id.atlassian.com/manage-profile/security/api-tokens</a>
+      and click <strong>"Create API token with scopes"</strong>. (Not "Create classic API token".)</p>
+      ` + img(jiraStep1B64, "Step 1 — Create API token with scopes button") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <strong>Name your token and set an expiry date</strong>
+      <p>Enter <code>timereporting-assistant</code> as the name and choose an expiry (up to 365 days). Click <strong>Next</strong>.</p>
+      ` + img(jiraStep2B64, "Step 2 — Name and expiry") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <strong>Select app: Jira</strong>
+      <p>Choose <strong>Jira</strong> from the application list. Click <strong>Next</strong>.</p>
+      ` + img(jiraStep3B64, "Step 3 — Select Jira") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <strong>Select exactly these two scopes</strong>
+      <p>Search for <code>jira-work</code> and tick both:</p>
+      <div class="scope-box">
+        <div>✅ <code>read:jira-work</code> — read your existing worklogs and issue summaries</div>
+        <div style="margin-top:6px">✅ <code>write:jira-work</code> — add new worklogs after you approve them</div>
+      </div>
+      <p style="margin-top:8px;color:#42526e;font-size:.85rem">That's all. No admin scopes, no project config access. Click <strong>Next</strong>.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <strong>Review and create — then copy immediately</strong>
+      <p>Confirm the summary shows <strong>App: Jira</strong> and <strong>Scopes: read:jira-work, write:jira-work</strong>. Click <strong>"Create token"</strong>. 
+      <span style="color:#de350b;font-weight:600">Copy the token now</span> — it is shown only once.</p>
+      ` + img(jiraStep5B64, "Step 5 — Review and create") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <strong>Paste the token back on the Settings page</strong>
+      <p>Return to <a href="/settings">Settings</a>, paste the token into the <strong>Jira API token</strong> field, and click <strong>Validate &amp; save</strong>.</p>
+    </div>
+  </div>
+</section>
+</main>
+<div id="lightbox" onclick="closeLightbox()">
+  <span id="lightbox-close" onclick="closeLightbox()">✕</span>
+  <img id="lightbox-img" src="" alt="">
+</div>
+<script>` + guideJS + `</script>
+</body></html>`
+}
+
+// githubGuideHTML is the dedicated GitHub personal access token guide page.
+const githubGuideHTML = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create a GitHub token — Timereporting Assistant</title>
+<style>` + guideCSS + `</style></head>
+<body>
+<header>
+  <h1>How to create a GitHub personal access token</h1>
+  <a href="/settings">← Back to Settings</a>
+</header>
+<main>
+<section>
+  <h2>What is this and why do you need it?</h2>
+  <p class="subtitle">
+    To detect which Jira tasks you worked on each day, the assistant can scan your commits, pull requests and code reviews on GitHub.
+    A personal access token (PAT) lets it read this activity from your work GitHub account.
+    Only <strong>read access</strong> is needed — it never writes anything to GitHub.
+    The token is stored in your Windows Credential Manager.
+  </p>
+  <p style="font-size:.85rem;color:#42526e">This is <strong>optional</strong>. If you leave it blank, the tool will rely only on your locally cloned git repos (which often covers everything anyway).</p>
+</section>
+
+<section>
+  <h2>Step-by-step (classic token — simplest)</h2>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <strong>Open the GitHub token page</strong>
+      <p>Go to <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a> (or your company's GitHub Enterprise equivalent). Click <strong>"Generate new token" → "Generate new token (classic)"</strong>.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <strong>Name and scope</strong>
+      <p>Enter <code>timereporting-assistant</code> as the note. Set an expiry. Under <strong>Scopes</strong>, tick <strong>only</strong>:</p>
+      <div class="scope-box">
+        <div>✅ <code>repo</code> — read access to your private repositories (commits, PRs, reviews)</div>
+      </div>
+      <p style="margin-top:8px;color:#42526e;font-size:.85rem">If your work repos are public, you only need the <code>public_repo</code> sub-scope.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <strong>Generate and copy</strong>
+      <p>Click <strong>"Generate token"</strong>. <span style="color:#de350b;font-weight:600">Copy the token immediately</span> — it is shown only once.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <strong>Paste on the Settings page</strong>
+      <p>Return to <a href="/settings">Settings</a>, paste the token into the <strong>GitHub token</strong> field, and click <strong>Save</strong>.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Alternative: Fine-grained token (more secure)</h2>
+  <p style="font-size:.85rem;color:#42526e">Fine-grained tokens let you scope access to specific repositories only.</p>
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <strong>Generate new token → "Fine-grained token"</strong>
+      <p>Under <strong>Repository access</strong>, select the work repos you want scanned.</p>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <strong>Permissions needed</strong>
+      <div class="scope-box">
+        <div>✅ <strong>Contents</strong> — Read-only (to read commits)</div>
+        <div style="margin-top:6px">✅ <strong>Pull requests</strong> — Read-only (to read PR activity)</div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+</body></html>`
+
+// buildSettingsHTML returns the settings/onboarding HTML with screenshots inlined.
+func buildSettingsHTML() string {
 	return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -895,6 +1136,7 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Credential status banner -->
 <section id="cred-section">
   <h2>Credentials</h2>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 12px">Status of your API tokens. Tokens are stored securely in the Windows Credential Manager — never in a file on disk.</p>
   <div class="cred-row">
     <strong style="min-width:120px">Jira token:</strong>
     <span id="jira-cred-badge" class="badge unset">not set</span>
@@ -908,6 +1150,7 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Jira configuration -->
 <section>
   <h2>Jira</h2>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Required. The tool reads your existing worklogs from Jira and, after you approve, writes new ones. Your real Jira is <strong>read-only</strong> until you explicitly choose the "Real Jira" target.</p>
   <div class="row">
     <div class="field">
       <label>Jira base URL *</label>
@@ -933,7 +1176,8 @@ button.secondary:hover{background:#f4f5f7}
 
   <h3 style="margin-top:18px">Jira API token</h3>
   <p style="font-size:.85rem;color:#42526e;margin:4px 0 10px">
-    You need a <strong>scoped API token</strong> (not a classic one). Follow the steps below.
+    You need a <strong>scoped API token</strong> (not a classic one).
+    <a href="/guide/jira-token" target="_blank" style="color:#0052cc">How to create one →</a>
   </p>
   <div class="cred-row">
     <input type="password" id="jiraToken" placeholder="Paste scoped API token here">
@@ -942,70 +1186,12 @@ button.secondary:hover{background:#f4f5f7}
   </div>
   <div id="jira-cred-msg" style="font-size:.82rem;margin-top:4px"></div>
 
-  <!-- Step-by-step token guide -->
-  <details style="margin-top:14px">
-    <summary style="cursor:pointer;font-size:.85rem;color:#0052cc;font-weight:600">
-      How to create a scoped Jira API token (step-by-step)
-    </summary>
-    <div class="guide">
-
-      <div class="step">
-        <div class="step-num">1</div>
-        <div class="step-body">
-          <strong>Open the API Tokens page</strong>
-          <p>Go to <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">id.atlassian.com/manage-profile/security/api-tokens</a>
-          and click <strong>"Create API token with scopes"</strong> (the right button).</p>
-          ` + img(jiraStep1B64, "Step 1 — Create API token with scopes button") + `
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">2</div>
-        <div class="step-body">
-          <strong>Name the token and set an expiry</strong>
-          <p>Enter <code>timereporting-assistant</code> as the name and pick an expiry date (max 365 days). Click <strong>Next</strong>.</p>
-          ` + img(jiraStep2B64, "Step 2 — Name and expiry") + `
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-body">
-          <strong>Select app: Jira</strong>
-          <p>Choose <strong>Jira</strong> from the list. Click <strong>Next</strong>.</p>
-          ` + img(jiraStep3B64, "Step 3 — Select Jira app") + `
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">4</div>
-        <div class="step-body">
-          <strong>Select scopes</strong>
-          <p>On the Select scopes page, search for and tick exactly these two scopes:</p>
-          <div class="scope-box">
-            <div>✅ <code>read:jira-work</code> — read issues and worklogs</div>
-            <div style="margin-top:6px">✅ <code>write:jira-work</code> — add / update worklogs</div>
-          </div>
-          <p style="margin-top:8px">Tip: type <code>jira-work</code> in the search box to find them quickly. Click <strong>Next</strong>.</p>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">5</div>
-        <div class="step-body">
-          <strong>Review and create</strong>
-          <p>Verify the token shows <strong>App: Jira</strong> and <strong>Scopes: read:jira-work, write:jira-work</strong>, then click <strong>"Create token"</strong>. Copy the token immediately — it will not be shown again.</p>
-          ` + img(jiraStep5B64, "Step 5 — Review and create token") + `
-        </div>
-      </div>
-
-    </div>
-  </details>
 </section>
 
 <!-- GitHub -->
 <section>
   <h2>GitHub activity (optional)</h2>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Used to detect which Jira tasks you worked on each day by scanning your commits, pull requests and code reviews. Leave blank to rely only on local git repos.</p>
   <div class="row">
     <div class="field">
       <label>GitHub username</label>
@@ -1018,7 +1204,7 @@ button.secondary:hover{background:#f4f5f7}
         <button class="secondary" onclick="togglePwd('ghToken',this)">Show</button>
         <button class="primary" onclick="saveGHCreds()">Save</button>
       </div>
-      <div class="hint">Needs <code>repo</code> read scope. <a href="https://github.com/settings/tokens" target="_blank">Create one</a></div>
+      <div class="hint">Needs <code>repo</code> read scope. <a href="/guide/github-token" target="_blank">How to create one →</a></div>
     </div>
   </div>
 </section>
@@ -1026,6 +1212,7 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Work repos + calendar -->
 <section>
   <h2>Local activity sources</h2>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">The tool scans your local git repos for commits to map time against Jira tasks. It also reads your exported Outlook/Teams calendar to split out meeting time first.</p>
   <div class="field">
     <label>Local git repository paths (one per line)</label>
     <textarea id="localRepos" rows="4" placeholder="C:\work\repo-one&#10;C:\work\repo-two"></textarea>
@@ -1045,6 +1232,7 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Workday + ports -->
 <section>
   <h2>Advanced</h2>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Defaults work for most people. Only change these if you use non-standard ports or a different contract hours per day.</p>
   <div class="row">
     <div class="field">
       <label>Workday hours</label>
@@ -1069,8 +1257,7 @@ button.secondary:hover{background:#f4f5f7}
       <input type="number" id="mockJiraPort" min="1024" max="65535">
     </div>
   </div>
-  <button class="primary" onclick="saveConfig()">Save settings</button>
-  <button class="primary" style="background:#00875a;margin-left:8px" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
+  <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
   <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
 </section>
 
@@ -1168,13 +1355,15 @@ async function saveConfig() {
 }
 
 async function saveJiraCreds() {
+  const baseUrl = document.getElementById('jiraBaseUrl').value.trim();
   const email = document.getElementById('jiraEmail').value.trim();
   const token = document.getElementById('jiraToken').value.trim();
   const msg = document.getElementById('jira-cred-msg');
-  if (!email || !token) { msg.textContent='⚠ Enter email and token above first.'; msg.style.color='#de350b'; return; }
+  if (!token) { msg.textContent='⚠ Paste the token first.'; msg.style.color='#de350b'; return; }
+  if (!baseUrl) { msg.textContent='⚠ Enter the Jira base URL above first.'; msg.style.color='#de350b'; return; }
   msg.textContent = 'Validating…'; msg.style.color = '#6b778c';
   try {
-    await api('POST','/credentials/jira',{email,token});
+    await api('POST','/credentials/jira',{baseUrl, email, token});
     msg.textContent = '✅ Token validated and saved to keychain.';
     msg.style.color = '#00875a';
     document.getElementById('jiraToken').value = '';
