@@ -79,22 +79,16 @@ func runMain() {
 	targetFlag := flag.String("target", "", "override target: mock | mock-write | real")
 	flag.Parse()
 
-	// ── Load config (first-run wizard if missing) ──────────────────────────
+	// ── Load config (no CLI wizard — use the web settings page for first-run) ──
 	cfg, err := config.Load(*cfgPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Fatalf("config: %v", err)
 	}
+	// If config is missing, start with defaults and let the web settings page
+	// handle onboarding (it will redirect / to /settings automatically).
 	if _, statErr := os.Stat(*cfgPath); os.IsNotExist(statErr) {
-		fmt.Printf("No config file found at %s — starting setup wizard.\n", *cfgPath)
-		cfg, err = setup.RunConfigWizard(*cfgPath, cfg)
-		if err != nil {
-			log.Fatalf("setup: %v", err)
-		}
-		// Reload to pick up saved values.
-		cfg, err = config.Load(*cfgPath)
-		if err != nil {
-			log.Fatalf("reload config: %v", err)
-		}
+		fmt.Printf("No config found at %s — open http://localhost:%d/settings to configure.\n",
+			*cfgPath, cfg.WebPort)
 	}
 	if *targetFlag != "" {
 		cfg.Target = *targetFlag
@@ -219,7 +213,8 @@ func runMain() {
 	}
 
 	// ── Web review UI ──────────────────────────────────────────────────────
-	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort)
+	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
+		WithConfig(cfg, *cfgPath)
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))

@@ -133,8 +133,8 @@ func countIncompleteDays(cfg config.Config) int {
 	var days []struct {
 		Existing  []struct{ Minutes int } `json:"existing"`
 		Suggested []struct{ Minutes int } `json:"suggested"`
-		Status    string                   `json:"status"`
-		Submitted bool                     `json:"submitted"`
+		Status    string                  `json:"status"`
+		Submitted bool                    `json:"submitted"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&days); err != nil {
 		return 0
