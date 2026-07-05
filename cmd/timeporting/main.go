@@ -288,6 +288,7 @@ func ensureMockRunning(port int) {
 		return // not bundled alongside this binary
 	}
 	cmd := exec.Command(path, "-port", fmt.Sprintf("%d", port))
+	hideWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		return
 	}

@@ -184,8 +184,8 @@ func ensureServerRunning(cfg config.Config) {
 		return
 	}
 	cmd := exec.Command(path, "--target", "mock", "--no-browser")
-	// Hide the console window — the tray is the user-visible launcher.
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// CREATE_NO_WINDOW prevents any console window from appearing.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
 }
 
