@@ -27,7 +27,7 @@ type DayView struct {
 	Suggested  []WlogView       `json:"suggested"`  // proposed; user edits these
 	Unassigned []UnassignedView `json:"unassigned"` // activity with no Jira key
 	Notes      []string         `json:"notes"`
-	Submitted  bool             `json:"submitted"`  // true after a successful Jira write
+	Submitted  bool             `json:"submitted"` // true after a successful Jira write
 }
 
 // UnassignedView is an activity item that has no Jira key yet.
@@ -55,17 +55,17 @@ type PlanBuilder func(cfg config.Config) ([]model.DayPlan, *jira.Client, *jira.C
 
 // Server holds the state for the web review session.
 type Server struct {
-	mu           sync.Mutex
-	days         []DayView      // ordered by date
-	dayIndex     map[string]int // date -> index
-	mockClient   *jira.Client   // writes to the mock server
-	realClient   *jira.Client   // writes to real Jira; nil when no credentials
-	activeWrite  string         // "mock" | "real" — where submits currently go
-	readSource   string         // display label for where existing worklogs were read
-	port         int
-	cfg          config.Config // current config (for settings page)
-	cfgPath      string        // path to config.json (for saving)
-	planBuilder  PlanBuilder   // called on reload to rebuild day plans
+	mu          sync.Mutex
+	days        []DayView      // ordered by date
+	dayIndex    map[string]int // date -> index
+	mockClient  *jira.Client   // writes to the mock server
+	realClient  *jira.Client   // writes to real Jira; nil when no credentials
+	activeWrite string         // "mock" | "real" — where submits currently go
+	readSource  string         // display label for where existing worklogs were read
+	port        int
+	cfg         config.Config // current config (for settings page)
+	cfgPath     string        // path to config.json (for saving)
+	planBuilder PlanBuilder   // called on reload to rebuild day plans
 }
 
 // New creates a Server. mockClient always writes to the mock; realClient (may be

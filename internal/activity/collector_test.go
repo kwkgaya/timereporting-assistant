@@ -229,4 +229,3 @@ func TestGitCollector_ReflogCommits(t *testing.T) {
 		t.Errorf("missing reflog-only commit; got acts: %+v", acts)
 	}
 }
-
