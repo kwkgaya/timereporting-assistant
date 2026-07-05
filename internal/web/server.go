@@ -6,8 +6,10 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -144,6 +146,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
 	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
+	mux.HandleFunc("POST /api/upload/ics", s.apiUploadICS)
 	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /wizard", s.handleWizard)
@@ -237,6 +240,15 @@ func saveConfigFile(path string, cfg config.Config) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// icsStoragePath returns the standard location where uploaded .ics files are saved.
+func icsStoragePath() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "timereporting-assistant", "calendar.ics")
 }
 
 func (s *Server) apiReload(w http.ResponseWriter, _ *http.Request) {
@@ -396,6 +408,44 @@ func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(faviconPNG)
+}
+
+// apiUploadICS accepts a multipart .ics file upload, saves it to the user's
+// AppData directory, and returns the saved path so the UI can auto-fill it.
+func (s *Server) apiUploadICS(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "parse form: "+err.Error())
+		return
+	}
+	file, _, err := r.FormFile("ics")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "no ics file in request")
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read file: "+err.Error())
+		return
+	}
+
+	savePath := icsStoragePath()
+	if err := os.MkdirAll(filepath.Dir(savePath), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "create dir: "+err.Error())
+		return
+	}
+	if err := os.WriteFile(savePath, data, 0o600); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save file: "+err.Error())
+		return
+	}
+
+	// Also update live config.
+	s.mu.Lock()
+	s.cfg.ICSPath = savePath
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]string{"path": savePath})
 }
 
 // handleWizard serves the first-run setup wizard.
@@ -1230,7 +1280,12 @@ a{color:#0052cc}
   <input type="text" id="w-authors" placeholder="you@example.com">
   <div class="hint">Filters commits by author. Comma-separated if you have more than one email.</div>
   <label>Outlook calendar .ics export — optional</label>
-  <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics">
+  <div class="input-row" style="margin-bottom:4px">
+    <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics" style="margin-bottom:0">
+    <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:38px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
+      📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'w-ics')">
+    </label>
+  </div>
   <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged first before other tasks.</div>
   <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change ports (default 9080 / 9099)</summary>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
@@ -1343,6 +1398,21 @@ async function saveReposAndFinish(){
     document.getElementById('btn-go').disabled=false;
   }
 }
+async function uploadICS(input, targetId) {
+  if (!input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('ics', input.files[0]);
+  try {
+    const r = await fetch('/api/upload/ics', {method:'POST', body:fd});
+    const d = await r.json();
+    if (r.ok) {
+      document.getElementById(targetId).value = d.path;
+      toast('Calendar file saved: '+d.path);
+    } else { toast(d.error||'Upload failed', true); }
+  } catch(e) { toast('Upload failed: '+e.message, true); }
+  input.value = '';
+}
+
 goTo(1);
 </script>
 </body></html>`
@@ -1499,7 +1569,12 @@ button.secondary:hover{background:#f4f5f7}
   </div>
   <div class="field">
     <label>Calendar export (.ics file path)</label>
-    <input type="text" id="icsPath" placeholder="C:\Users\you\Downloads\calendar.ics">
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" id="icsPath" placeholder="C:\Users\you\Downloads\calendar.ics" style="flex:1;margin-bottom:0">
+      <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:36px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
+        📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'icsPath')">
+      </label>
+    </div>
     <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged to the meeting task key above.</div>
   </div>
 </section>
@@ -1669,6 +1744,21 @@ async function saveAndRebuild() {
     a.href = '/'; a.textContent = 'Go to time report →';
     document.getElementById('cfg-msg').appendChild(a);
   } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
+}
+
+async function uploadICS(input, targetId) {
+  if (!input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('ics', input.files[0]);
+  try {
+    const r = await fetch('/api/upload/ics', {method:'POST', body:fd});
+    const d = await r.json();
+    if (r.ok) {
+      document.getElementById(targetId).value = d.path;
+      toast('Calendar file saved: '+d.path);
+    } else { toast(d.error||'Upload failed', true); }
+  } catch(e) { toast('Upload failed: '+e.message, true); }
+  input.value = '';
 }
 
 loadConfig(); loadCredStatus();
