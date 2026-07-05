@@ -38,7 +38,7 @@ type KeyGroup struct {
 
 // GroupResult is the output of GroupByKey.
 type GroupResult struct {
-	Groups     []KeyGroup     // keyed activities, sorted by key
+	Groups     []KeyGroup       // keyed activities, sorted by key
 	Unassigned []model.Activity // activities with no Jira key
 }
 

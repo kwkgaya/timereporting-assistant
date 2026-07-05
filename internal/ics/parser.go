@@ -121,7 +121,8 @@ func unfold(r io.Reader) ([]string, error) {
 
 // splitLine splits a content line into name, params string, and value.
 // e.g. "DTSTART;TZID=America/New_York:20260601T090000"
-//   -> name="DTSTART", params="TZID=America/New_York", value="20260601T090000"
+//
+//	-> name="DTSTART", params="TZID=America/New_York", value="20260601T090000"
 func splitLine(line string) (name, params, value string) {
 	colon := strings.IndexByte(line, ':')
 	if colon < 0 {

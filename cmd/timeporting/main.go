@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -28,7 +29,7 @@ func main() {
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Fatalf("config: %v", err)
 	}
 	if *targetFlag != "" {
