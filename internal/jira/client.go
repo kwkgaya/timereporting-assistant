@@ -104,12 +104,15 @@ func (c *Client) GetIssue(key string) (Issue, error) {
 }
 
 // SearchIssues runs a JQL query and returns matching issues (key + summary).
+// Uses POST /rest/api/3/search/jql as required by Jira Cloud since mid-2025
+// (the old GET /rest/api/3/search was removed — see CHANGE-2046).
 func (c *Client) SearchIssues(jql string) ([]Issue, error) {
-	q := url.Values{}
-	q.Set("jql", jql)
-	q.Set("fields", "summary")
-	q.Set("maxResults", "100")
-	data, err := c.do(http.MethodGet, "/rest/api/3/search?"+q.Encode(), nil)
+	body := map[string]any{
+		"jql":        jql,
+		"fields":     []string{"summary"},
+		"maxResults": 100,
+	}
+	data, err := c.do(http.MethodPost, "/rest/api/3/search/jql", body)
 	if err != nil {
 		return nil, err
 	}

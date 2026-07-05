@@ -18,7 +18,7 @@
 | Purpose | Method + path |
 |---|---|
 | Verify token / whoami | `GET /rest/api/3/myself` |
-| Read existing worklogs | `GET /rest/api/3/search` (JQL) + `GET /rest/api/3/issue/{key}/worklog` |
+| Read existing worklogs | `POST /rest/api/3/search/jql` (JQL body) + `GET /rest/api/3/issue/{key}/worklog` |
 | Issue summary | `GET /rest/api/3/issue/{key}?fields=summary` |
 | Add worklog | `POST /rest/api/3/issue/{key}/worklog` |
 

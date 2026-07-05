@@ -111,6 +111,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /rest/api/3/issue/{key}/worklog/{id}", s.handleUpdateWorklog)
 	mux.HandleFunc("DELETE /rest/api/3/issue/{key}/worklog/{id}", s.handleDeleteWorklog)
 	mux.HandleFunc("GET /rest/api/3/issue/{key}", s.handleGetIssue)
+	// New Jira Cloud search endpoint (replaces the removed /rest/api/3/search).
+	mux.HandleFunc("POST /rest/api/3/search/jql", s.handleSearch)
+	// Keep old path for backward-compat with existing tests.
 	mux.HandleFunc("GET /rest/api/3/search", s.handleSearch)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux

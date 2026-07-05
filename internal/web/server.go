@@ -380,10 +380,27 @@ func (s *Server) apiSetGitHubCredentials(w http.ResponseWriter, r *http.Request)
 }
 
 // validateJiraToken calls /rest/api/3/myself to verify credentials.
+// validateJiraToken verifies credentials by calling GET /rest/api/3/myself —
+// a stable, non-deprecated endpoint that requires no specific permissions beyond auth.
 func validateJiraToken(baseURL, email, token string) error {
-	c := jira.NewClient(baseURL, email, token)
-	_, err := c.SearchIssues("order by created DESC")
-	return err
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/rest/api/3/myself", nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(email, token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("invalid credentials (status %d) — check email and token", resp.StatusCode)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d from Jira", resp.StatusCode)
+	}
+	return nil
 }
 
 // handleFavicon serves the app icon as a favicon (PNG format, accepted by all modern browsers).
