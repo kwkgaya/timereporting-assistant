@@ -67,7 +67,7 @@ func ResolveAPIBase(baseURL, email, token string) (string, error) {
 	}
 	apiBase := "https://api.atlassian.com/ex/jira/" + cloudID
 	if err := tryMyself(httpClient, apiBase, email, token); err != nil {
-		return "", fmt.Errorf("authentication failed at %s — check that '%s' is your Atlassian account email (id.atlassian.com/manage-profile) and the token was copied in full", apiBase, email)
+		return "", fmt.Errorf("authentication failed with scoped token at %s — ensure the token has 'read:jira-work' and 'write:jira-work' scopes and was copied in full", apiBase)
 	}
 	return apiBase, nil
 }
@@ -77,8 +77,7 @@ func tryMyself(client *http.Client, base, email, token string) error {
 	if err != nil {
 		return err
 	}
-	auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
-	req.Header.Set("Authorization", "Basic "+auth)
+	setAuth(req, base, email, token)
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -89,6 +88,18 @@ func tryMyself(client *http.Client, base, email, token string) error {
 		return nil
 	}
 	return fmt.Errorf("status %d", resp.StatusCode)
+}
+
+// setAuth sets the correct Authorization header.
+// Scoped tokens at api.atlassian.com use Bearer auth (token only, no email).
+// Classic tokens at the domain URL use Basic auth (email:token).
+func setAuth(req *http.Request, base, email, token string) {
+	if strings.Contains(base, "api.atlassian.com") {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if email != "" && token != "" {
+		auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
+		req.Header.Set("Authorization", "Basic "+auth)
+	}
 }
 
 func fetchCloudID(client *http.Client, base string) (string, error) {
@@ -140,10 +151,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.email != "" && c.token != "" {
-		auth := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + c.token))
-		req.Header.Set("Authorization", "Basic "+auth)
-	}
+	setAuth(req, c.baseURL, c.email, c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
