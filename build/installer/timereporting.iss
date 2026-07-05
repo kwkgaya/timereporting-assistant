@@ -55,7 +55,7 @@ Name: "{userdesktop}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
-Name: "autostart"; Description: "Start tray app when I log in (recommended)"; Flags: checkedonce
+Name: "autostart"; Description: "Start tray app when I log in (recommended)"
 
 [Registry]
 ; Optional auto-start at login (per-user, no admin).
