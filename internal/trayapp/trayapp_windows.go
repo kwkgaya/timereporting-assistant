@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"fyne.io/systray"
@@ -182,7 +183,9 @@ func ensureServerRunning(cfg config.Config) {
 	if _, err := os.Stat(path); err != nil {
 		return
 	}
-	cmd := exec.Command(path, "--target", "mock")
+	cmd := exec.Command(path, "--target", "mock", "--no-browser")
+	// Hide the console window — the tray is the user-visible launcher.
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = cmd.Start()
 }
 

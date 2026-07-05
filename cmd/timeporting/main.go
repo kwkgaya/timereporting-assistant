@@ -77,6 +77,7 @@ func runMain() {
 	from := flag.String("from", "", "start date YYYY-MM-DD (default: first day of current month)")
 	to := flag.String("to", "", "end date YYYY-MM-DD (default: last day of current month)")
 	targetFlag := flag.String("target", "", "override target: mock | mock-write | real")
+	noBrowser := flag.Bool("no-browser", false, "do not auto-open the browser (used when launched by the tray app)")
 	flag.Parse()
 
 	// ── Load config (no CLI wizard — use the web settings page for first-run) ──
@@ -235,10 +236,13 @@ func runMain() {
 	}
 
 	// Open the review UI in the browser shortly after the server starts.
-	go func() {
-		time.Sleep(700 * time.Millisecond)
-		openURL("http://" + addr)
-	}()
+	// Skipped when --no-browser is set (tray app opens it instead).
+	if !*noBrowser {
+		go func() {
+			time.Sleep(700 * time.Millisecond)
+			openURL("http://" + addr)
+		}()
+	}
 
 	if err := http.ListenAndServe(addr, webSrv.Handler()); err != nil {
 		log.Fatal(err)
