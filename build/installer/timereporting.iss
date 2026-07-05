@@ -65,7 +65,14 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\tray.exe"; Description: "Start tray app now (recommended)"; \
+; Start the tray companion (system-tray icon + auto-start).
+Filename: "{app}\tray.exe"; \
+  Flags: nowait postinstall skipifsilent
+
+; Start the review server — it auto-opens the setup wizard in the browser
+; on first run (no config yet). Launched after tray so the tray is ready.
+Filename: "{app}\timeporting.exe"; \
+  Description: "Open setup wizard now"; \
   Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
