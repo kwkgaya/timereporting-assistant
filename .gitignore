@@ -1,0 +1,26 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Local config with secrets (never commit)
+config.json
+config.local.json
+*.local.json
+.env
+
+# User data: calendar exports, generated drafts
+/data/
+/drafts/
+
+# Editors
+.idea/

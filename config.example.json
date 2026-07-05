@@ -1,0 +1,24 @@
+{
+  "jira": {
+    "baseUrl": "https://application.jira.elementlogic.no",
+    "email": "you@elementlogic.no"
+  },
+  "meetingIssueKey": "EDB-9071",
+  "leaveIssueKey": "EDB-9070",
+  "workdayHours": 7,
+  "github": {
+    "apiBaseUrl": "https://api.github.com",
+    "username": "your-work-github-username"
+  },
+  "localRepos": [
+    "C:/path/to/work/repo-one",
+    "C:/path/to/work/repo-two"
+  ],
+  "gitAuthors": [
+    "you@elementlogic.no"
+  ],
+  "icsPath": "data/calendar.ics",
+  "mockJiraPort": 8099,
+  "webPort": 8080,
+  "target": "mock"
+}
