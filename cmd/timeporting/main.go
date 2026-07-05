@@ -6,8 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/activity"
@@ -20,6 +24,9 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/web"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+var version = "dev"
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -28,6 +35,9 @@ func main() {
 			return
 		case "credentials":
 			runCredentials()
+			return
+		case "version", "--version", "-v":
+			fmt.Printf("timereporting-assistant %s\n", version)
 			return
 		}
 	}
@@ -136,6 +146,12 @@ func runMain() {
 	// ── Jira clients (split read/write for mock-write mode) ────────────────
 	mockBase := fmt.Sprintf("http://localhost:%d", cfg.MockJiraPort)
 
+	// If any target uses the mock, make sure it's running (auto-spawn the
+	// bundled mockjira binary if the port isn't already listening).
+	if cfg.Target != config.TargetReal {
+		ensureMockRunning(cfg.MockJiraPort)
+	}
+
 	var readClient *jira.Client  // for fetching existing worklogs
 	var writeClient *jira.Client // for submitting new worklogs
 
@@ -205,6 +221,12 @@ func runMain() {
 		fmt.Printf("   Mock Jira inspect → http://localhost:%d\n", cfg.MockJiraPort)
 	}
 
+	// Open the review UI in the browser shortly after the server starts.
+	go func() {
+		time.Sleep(700 * time.Millisecond)
+		openURL("http://" + addr)
+	}()
+
 	if err := http.ListenAndServe(addr, webSrv.Handler()); err != nil {
 		log.Fatal(err)
 	}
@@ -227,3 +249,53 @@ func writeLabel(target string, mockPort int) string {
 		return fmt.Sprintf("Mock Jira (http://localhost:%d)", mockPort)
 	}
 }
+
+// ensureMockRunning starts the bundled mockjira binary if the given port is not
+// already accepting connections. Best-effort: silently gives up on any error.
+func ensureMockRunning(port int) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	if c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond); err == nil {
+		_ = c.Close()
+		return // already running
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	name := "mockjira"
+	if runtime.GOOS == "windows" {
+		name = "mockjira.exe"
+	}
+	path := filepath.Join(filepath.Dir(exe), name)
+	if _, err := os.Stat(path); err != nil {
+		return // not bundled alongside this binary
+	}
+	cmd := exec.Command(path, "-port", fmt.Sprintf("%d", port))
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	fmt.Printf("Started bundled mock Jira on port %d\n", port)
+	// Wait briefly for it to come up.
+	for i := 0; i < 20; i++ {
+		if c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+			_ = c.Close()
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+// openURL opens the given URL in the default browser (best-effort).
+func openURL(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
+}
+
