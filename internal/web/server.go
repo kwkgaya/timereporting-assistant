@@ -145,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
 	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
+	mux.HandleFunc("GET /wizard", s.handleWizard)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
@@ -382,6 +383,12 @@ func validateJiraToken(baseURL, email, token string) error {
 	c := jira.NewClient(baseURL, email, token)
 	_, err := c.SearchIssues("order by created DESC")
 	return err
+}
+
+// handleWizard serves the first-run setup wizard.
+func (s *Server) handleWizard(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(wizardHTML))
 }
 
 // handleJiraGuide serves the Jira API token creation guide.
@@ -798,7 +805,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	needsSetup := s.cfg.Jira.BaseURL == "" || s.cfg.JiraAPIToken == ""
 	s.mu.Unlock()
 	if needsSetup && r.URL.Path == "/" {
-		http.Redirect(w, r, "/settings", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/wizard", http.StatusTemporaryRedirect)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1073,6 +1080,238 @@ const githubGuideHTML = `<!doctype html>
 </main>
 </body></html>`
 
+
+// wizardHTML is the first-run setup wizard.
+const wizardHTML = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup — Timereporting Assistant</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#172b4d;min-height:100vh;display:flex;flex-direction:column}
+header{background:#0052cc;color:#fff;padding:12px 20px}
+header h1{margin:0;font-size:1.1rem;font-weight:600}
+.progress-bar{background:#e9f2ff;height:6px}
+.progress-fill{background:#0052cc;height:6px;transition:width .3s}
+main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.card{background:#fff;border:1px solid #dfe1e6;border-radius:8px;width:100%;max-width:540px;padding:32px 36px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.step-label{font-size:.78rem;font-weight:600;color:#6b778c;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+h2{margin:0 0 6px;font-size:1.2rem;font-weight:700}
+.subtitle{font-size:.9rem;color:#42526e;margin:0 0 24px}
+label{display:block;font-size:.83rem;font-weight:600;margin-bottom:4px;color:#344563}
+input[type=text],input[type=password],textarea{width:100%;padding:8px 10px;border:1px solid #dfe1e6;border-radius:4px;font:inherit;font-size:.9rem;margin-bottom:14px}
+input:focus,textarea:focus{outline:none;border-color:#0052cc;box-shadow:0 0 0 2px rgba(0,82,204,.15)}
+textarea{resize:vertical;min-height:80px}
+.hint{font-size:.78rem;color:#6b778c;margin-top:-10px;margin-bottom:14px}
+.btn-row{display:flex;gap:10px;margin-top:8px;align-items:center;flex-wrap:wrap}
+button{font:inherit;border-radius:4px;padding:9px 20px;cursor:pointer;font-size:.9rem}
+.btn-primary{background:#0052cc;color:#fff;border:none}
+.btn-primary:hover{background:#0747a6}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:#fff;color:#172b4d;border:1px solid #dfe1e6}
+.btn-secondary:hover{background:#f4f5f7}
+.btn-skip{background:none;border:none;color:#6b778c;font-size:.85rem;cursor:pointer;text-decoration:underline;padding:0}
+.btn-skip:hover{color:#172b4d}
+.error{color:#de350b;font-size:.83rem;margin-top:4px;min-height:18px}
+.show-btn{background:#f4f5f7;border:1px solid #dfe1e6;padding:8px 12px;border-radius:4px;cursor:pointer;font-size:.83rem;white-space:nowrap;height:38px}
+.input-row{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.input-row input{margin-bottom:0;flex:1}
+.checklist{list-style:none;padding:0;margin:0 0 20px}
+.checklist li{padding:5px 0;font-size:.9rem;color:#42526e}
+.checklist li::before{content:"✓ ";color:#00875a;font-weight:700}
+.done-icon{font-size:3rem;text-align:center;margin-bottom:12px}
+a{color:#0052cc}
+</style></head>
+<body>
+<header><h1>Timereporting Assistant — Setup</h1></header>
+<div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
+<main>
+
+<div class="card" id="step-1">
+  <div class="step-label">Step 1 of 6</div>
+  <h2>Welcome! 👋</h2>
+  <p class="subtitle">This takes about 2 minutes. Here's what you'll need:</p>
+  <ul class="checklist">
+    <li>Your Jira login email and base URL</li>
+    <li>A scoped Jira API token (we guide you through it)</li>
+    <li>Paths to your local git repositories</li>
+    <li>An exported .ics calendar file — optional</li>
+    <li>A GitHub token — optional</li>
+  </ul>
+  <div class="btn-row">
+    <button class="btn-primary" onclick="goTo(2)">Let's go →</button>
+    <a href="/settings" style="font-size:.85rem;color:#6b778c;text-decoration:none">Configure manually instead</a>
+  </div>
+</div>
+
+<div class="card" id="step-2" style="display:none">
+  <div class="step-label">Step 2 of 6</div>
+  <h2>Jira connection</h2>
+  <p class="subtitle">The URL you open when you log into Jira.</p>
+  <label>Jira base URL *</label>
+  <input type="text" id="w-jiraBaseUrl" placeholder="https://your-domain.atlassian.net" oninput="clearErr('err-2')">
+  <label>Your Jira login email *</label>
+  <input type="text" id="w-jiraEmail" placeholder="you@example.com" oninput="clearErr('err-2')">
+  <label>Meeting task key</label>
+  <input type="text" id="w-meetingKey" value="EDB-9071">
+  <div class="hint">All meeting time from your calendar is logged to this task.</div>
+  <label>Leave / holiday task key</label>
+  <input type="text" id="w-leaveKey" value="EDB-9070">
+  <div class="hint">Public holidays and leave days are logged to this task.</div>
+  <div class="error" id="err-2"></div>
+  <div class="btn-row">
+    <button class="btn-secondary" onclick="goTo(1)">← Back</button>
+    <button class="btn-primary" onclick="validateStep2()">Next →</button>
+  </div>
+</div>
+
+<div class="card" id="step-3" style="display:none">
+  <div class="step-label">Step 3 of 6</div>
+  <h2>Jira API token</h2>
+  <p class="subtitle">A <strong>scoped token</strong> lets the tool read and write your worklogs — nothing else.
+  <a href="/guide/jira-token" target="_blank">How to create one →</a></p>
+  <label>Scoped API token *</label>
+  <div class="input-row">
+    <input type="password" id="w-jiraToken" placeholder="Paste token here" oninput="clearErr('err-3')">
+    <button class="show-btn" onclick="togglePwd('w-jiraToken',this)">Show</button>
+  </div>
+  <div class="error" id="err-3"></div>
+  <div class="btn-row" style="margin-top:4px">
+    <button class="btn-secondary" onclick="goTo(2)">← Back</button>
+    <button class="btn-primary" id="btn-validate" onclick="validateAndSaveJira()">Validate &amp; continue →</button>
+  </div>
+</div>
+
+<div class="card" id="step-4" style="display:none">
+  <div class="step-label">Step 4 of 6</div>
+  <h2>GitHub activity <span style="font-size:.8rem;font-weight:400;color:#6b778c">(optional)</span></h2>
+  <p class="subtitle">Scan your commits and PRs to detect which Jira tasks you worked on.
+  Skip if you only use local repos. <a href="/guide/github-token" target="_blank">How to create a token →</a></p>
+  <label>GitHub username</label>
+  <input type="text" id="w-ghUser" placeholder="your-work-github-username">
+  <label>GitHub token</label>
+  <div class="input-row">
+    <input type="password" id="w-ghToken" placeholder="github_pat_..." oninput="clearErr('err-4')">
+    <button class="show-btn" onclick="togglePwd('w-ghToken',this)">Show</button>
+  </div>
+  <div class="error" id="err-4"></div>
+  <div class="btn-row" style="margin-top:4px">
+    <button class="btn-secondary" onclick="goTo(3)">← Back</button>
+    <button class="btn-primary" onclick="saveGitHub()">Next →</button>
+    <button class="btn-skip" onclick="goTo(5)">Skip for now</button>
+  </div>
+</div>
+
+<div class="card" id="step-5" style="display:none">
+  <div class="step-label">Step 5 of 6</div>
+  <h2>Local repos &amp; calendar</h2>
+  <p class="subtitle">Where to find your local git repositories and meeting data.</p>
+  <label>Git repo paths * (one per line)</label>
+  <textarea id="w-repos" placeholder="C:\work\project-one&#10;C:\work\project-two" oninput="clearErr('err-5')"></textarea>
+  <label>Your git author email(s)</label>
+  <input type="text" id="w-authors" placeholder="you@example.com">
+  <div class="hint">Filters commits by author. Comma-separated if you have more than one email.</div>
+  <label>Outlook calendar .ics export — optional</label>
+  <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics">
+  <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged first before other tasks.</div>
+  <div class="error" id="err-5"></div>
+  <div class="btn-row">
+    <button class="btn-secondary" onclick="goTo(4)">← Back</button>
+    <button class="btn-primary" onclick="saveReposAndFinish()">Save &amp; build plans →</button>
+  </div>
+</div>
+
+<div class="card" id="step-6" style="display:none">
+  <div class="step-label">Step 6 of 6</div>
+  <div class="done-icon">🎉</div>
+  <h2 style="text-align:center">You're all set!</h2>
+  <p class="subtitle" style="text-align:center" id="done-msg">Building your time report plans…</p>
+  <div class="btn-row" style="justify-content:center;margin-top:16px">
+    <button class="btn-primary" id="btn-go" onclick="window.location='/'" disabled>Open time report →</button>
+  </div>
+</div>
+
+</main>
+<script>
+const TOTAL=6;
+function goTo(n){
+  document.querySelectorAll('.card').forEach(c=>c.style.display='none');
+  document.getElementById('step-'+n).style.display='block';
+  document.getElementById('progress').style.width=Math.round((n/TOTAL)*100)+'%';
+  window.scrollTo(0,0);
+}
+function clearErr(id){document.getElementById(id).textContent='';}
+function showErr(id,msg){document.getElementById(id).textContent=msg;}
+function togglePwd(id,btn){
+  const el=document.getElementById(id);
+  el.type=el.type==='password'?'text':'password';
+  btn.textContent=el.type==='password'?'Show':'Hide';
+}
+async function api(method,path,body){
+  const opts={method,headers:{'Content-Type':'application/json'}};
+  if(body)opts.body=JSON.stringify(body);
+  const r=await fetch('/api'+path,opts);
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error||r.statusText);
+  return d;
+}
+function validateStep2(){
+  const url=document.getElementById('w-jiraBaseUrl').value.trim();
+  const email=document.getElementById('w-jiraEmail').value.trim();
+  if(!url||!url.startsWith('http')){showErr('err-2','Enter a valid Jira URL (starts with https://).');return;}
+  if(!email||!email.includes('@')){showErr('err-2','Enter your Jira login email.');return;}
+  goTo(3);
+}
+async function validateAndSaveJira(){
+  const token=document.getElementById('w-jiraToken').value.trim();
+  if(!token){showErr('err-3','Paste your token first.');return;}
+  const baseUrl=document.getElementById('w-jiraBaseUrl').value.trim();
+  const email=document.getElementById('w-jiraEmail').value.trim();
+  const btn=document.getElementById('btn-validate');
+  btn.disabled=true;btn.textContent='Validating…';
+  try{
+    await api('PUT','/config',{
+      jiraBaseUrl:baseUrl,jiraEmail:email,
+      meetingKey:document.getElementById('w-meetingKey').value.trim()||'EDB-9071',
+      leaveKey:document.getElementById('w-leaveKey').value.trim()||'EDB-9070',
+    });
+    await api('POST','/credentials/jira',{baseUrl,email,token});
+    goTo(4);
+  }catch(e){showErr('err-3','❌ '+e.message);}
+  finally{btn.disabled=false;btn.textContent='Validate & continue →';}
+}
+async function saveGitHub(){
+  const user=document.getElementById('w-ghUser').value.trim();
+  const token=document.getElementById('w-ghToken').value.trim();
+  if(user&&!token){showErr('err-4','Enter a token for the username, or skip.');return;}
+  try{
+    if(token){
+      await api('PUT','/config',{githubUsername:user});
+      await api('POST','/credentials/github',{token});
+    }
+    goTo(5);
+  }catch(e){showErr('err-4','❌ '+e.message);}
+}
+async function saveReposAndFinish(){
+  const repos=document.getElementById('w-repos').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!repos.length){showErr('err-5','Enter at least one repository path.');return;}
+  const authors=document.getElementById('w-authors').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const ics=document.getElementById('w-ics').value.trim();
+  goTo(6);
+  try{
+    await api('PUT','/config',{localRepos:repos,gitAuthors:authors,icsPath:ics,workdayHours:7,target:'mock'});
+    const res=await api('POST','/reload');
+    document.getElementById('done-msg').textContent='Plans built for '+res.rebuilt+' days. You\'re ready!';
+    document.getElementById('btn-go').disabled=false;
+  }catch(e){
+    document.getElementById('done-msg').textContent='⚠ '+e.message+' — you can still continue.';
+    document.getElementById('btn-go').disabled=false;
+  }
+}
+goTo(1);
+</script>
+</body></html>`
+
 // buildSettingsHTML returns the settings/onboarding HTML with screenshots inlined.
 func buildSettingsHTML() string {
 	return `<!doctype html>
@@ -1129,6 +1368,7 @@ button.secondary:hover{background:#f4f5f7}
 <body>
 <header>
   <h1>⚙ Settings</h1>
+  <a href="/wizard" style="font-size:.8rem;margin-right:8px">↺ Setup wizard</a>
   <a href="/">← Back to time report</a>
 </header>
 <main>
