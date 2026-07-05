@@ -30,6 +30,10 @@ const (
 type JiraConfig struct {
 	BaseURL string `json:"baseUrl"`
 	Email   string `json:"email"`
+	// APIBase is the resolved base URL for REST API calls. For scoped tokens
+	// this is https://api.atlassian.com/ex/jira/{cloudId}; for classic tokens
+	// it matches BaseURL. Set automatically during token validation.
+	APIBase string `json:"apiBase,omitempty"`
 }
 
 // GitHubConfig holds GitHub connection settings (non-secret).
@@ -141,6 +145,15 @@ func (c Config) NeedsRealJiraRead() bool {
 // NeedsRealJiraWrite returns true when the target writes to real Jira.
 func (c Config) NeedsRealJiraWrite() bool {
 	return c.Target == TargetReal
+}
+
+// JiraAPIBase returns the base URL to use for Jira REST API calls.
+// If APIBase has been resolved (scoped token), it returns that; otherwise BaseURL.
+func (c Config) JiraAPIBase() string {
+	if c.Jira.APIBase != "" {
+		return c.Jira.APIBase
+	}
+	return c.Jira.BaseURL
 }
 
 // RequireRealJira validates the settings needed to talk to real Jira.

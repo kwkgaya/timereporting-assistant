@@ -333,7 +333,8 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "Jira base URL is required — fill it in above")
 		return
 	}
-	if err := validateJiraToken(baseURL, email, body.Token); err != nil {
+	apiBase, err := validateJiraToken(baseURL, email, body.Token)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "token validation failed: "+err.Error())
 		return
 	}
@@ -341,12 +342,13 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "keychain store: "+err.Error())
 		return
 	}
-	// Update live config + real client.
+	// Update live config + real client (use the resolved API base URL).
 	s.mu.Lock()
 	s.cfg.Jira.BaseURL = baseURL
+	s.cfg.Jira.APIBase = apiBase
 	s.cfg.Jira.Email = email
 	s.cfg.JiraAPIToken = body.Token
-	s.realClient = jira.NewClient(baseURL, email, body.Token)
+	s.realClient = jira.NewClient(apiBase, email, body.Token)
 	cfgPath := s.cfgPath
 	cfg := s.cfg
 	s.mu.Unlock()
@@ -382,25 +384,11 @@ func (s *Server) apiSetGitHubCredentials(w http.ResponseWriter, r *http.Request)
 // validateJiraToken calls /rest/api/3/myself to verify credentials.
 // validateJiraToken verifies credentials by calling GET /rest/api/3/myself —
 // a stable, non-deprecated endpoint that requires no specific permissions beyond auth.
-func validateJiraToken(baseURL, email, token string) error {
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/rest/api/3/myself", nil)
-	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(email, token)
-	req.Header.Set("Accept", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("authentication failed (status %d) — verify that '%s' is the email shown at id.atlassian.com/manage-profile (not your work email), and that the token was copied in full", resp.StatusCode, email)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("unexpected status %d from Jira", resp.StatusCode)
-	}
-	return nil
+// For scoped tokens it auto-resolves the cloudId and api.atlassian.com URL.
+// Returns the resolved API base URL to save, or an error.
+func validateJiraToken(baseURL, email, token string) (string, error) {
+	apiBase, err := jira.ResolveAPIBase(baseURL, email, token)
+	return apiBase, err
 }
 
 // handleFavicon serves the app icon as a favicon (PNG format, accepted by all modern browsers).
@@ -1192,7 +1180,7 @@ a{color:#0052cc}
 <div class="card" id="step-3" style="display:none">
   <div class="step-label">Step 3 of 6</div>
   <h2>Jira API token</h2>
-  <p class="subtitle">A <strong>scoped token</strong> lets the tool read and write your worklogs — nothing else.
+  <p class="subtitle">You need a <strong>Classic API token</strong> — not the newer "API token with scopes". Classic tokens use the same authentication method this app is built for.
   <a href="/guide/jira-token" target="_blank">How to create one →</a></p>
   <p style="font-size:.82rem;background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:8px 12px;margin-bottom:12px">
     ⚠ The email must be your <strong>Atlassian account email</strong> — check it at

@@ -153,7 +153,9 @@ func runMain() {
 
 	mockClient = jira.NewClient(mockBase, "", "")
 	if cfg.Jira.BaseURL != "" && cfg.JiraAPIToken != "" {
-		realClient = jira.NewClient(cfg.Jira.BaseURL, cfg.Jira.Email, cfg.JiraAPIToken)
+		// Use the resolved API base (api.atlassian.com/ex/jira/{cloudId} for scoped
+		// tokens, or the domain URL for classic tokens).
+		realClient = jira.NewClient(cfg.JiraAPIBase(), cfg.Jira.Email, cfg.JiraAPIToken)
 	}
 
 	switch cfg.Target {
@@ -175,7 +177,7 @@ func runMain() {
 		mb := jira.NewClient(fmt.Sprintf("http://localhost:%d", c.MockJiraPort), "", "")
 		var rb *jira.Client
 		if c.Jira.BaseURL != "" && c.JiraAPIToken != "" {
-			rb = jira.NewClient(c.Jira.BaseURL, c.Jira.Email, c.JiraAPIToken)
+			rb = jira.NewClient(c.JiraAPIBase(), c.Jira.Email, c.JiraAPIToken)
 		}
 
 		var rc *jira.Client // read client

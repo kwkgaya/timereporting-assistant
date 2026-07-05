@@ -46,6 +46,77 @@ func NewClient(baseURL, email, token string) *Client {
 	}
 }
 
+// ResolveAPIBase auto-detects whether token is a scoped token by trying Basic
+// auth at baseURL/rest/api/3/myself. If that fails with a cloud-ID-required
+// error, it fetches the cloudId from baseURL/_edge/tenant_info and returns the
+// api.atlassian.com base URL instead. Returns the base URL to use for all REST
+// calls, plus any error if both attempts fail.
+func ResolveAPIBase(baseURL, email, token string) (string, error) {
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	base := strings.TrimRight(baseURL, "/")
+
+	// First try: classic token at the domain URL.
+	if err := tryMyself(httpClient, base, email, token); err == nil {
+		return base, nil
+	}
+
+	// Second try: scoped token needs cloudId → api.atlassian.com base URL.
+	cloudID, err := fetchCloudID(httpClient, base)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve Jira cloud ID from %s: %w", base, err)
+	}
+	apiBase := "https://api.atlassian.com/ex/jira/" + cloudID
+	if err := tryMyself(httpClient, apiBase, email, token); err != nil {
+		return "", fmt.Errorf("authentication failed at %s — check that '%s' is your Atlassian account email (id.atlassian.com/manage-profile) and the token was copied in full", apiBase, email)
+	}
+	return apiBase, nil
+}
+
+func tryMyself(client *http.Client, base, email, token string) error {
+	req, err := http.NewRequest(http.MethodGet, base+"/rest/api/3/myself", nil)
+	if err != nil {
+		return err
+	}
+	auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
+	req.Header.Set("Authorization", "Basic "+auth)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	return fmt.Errorf("status %d", resp.StatusCode)
+}
+
+func fetchCloudID(client *http.Client, base string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, base+"/_edge/tenant_info", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tenant_info status %d", resp.StatusCode)
+	}
+	var result struct {
+		CloudID string `json:"cloudId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.CloudID == "" {
+		return "", fmt.Errorf("cloudId not found in tenant_info response")
+	}
+	return result.CloudID, nil
+}
+
 // Issue is a Jira issue's identity and summary.
 type Issue struct {
 	Key     string
