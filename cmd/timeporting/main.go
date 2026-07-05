@@ -47,7 +47,7 @@ func main() {
 // runConfigure runs the interactive first-run config wizard.
 func runConfigure() {
 	fs := flag.NewFlagSet("configure", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.json", "path to config JSON file")
+	cfgPath := fs.String("config", defaultConfigPath(), "path to config JSON file")
 	_ = fs.Parse(os.Args[2:])
 
 	existing, err := config.Load(*cfgPath)
@@ -62,7 +62,7 @@ func runConfigure() {
 // runCredentials runs the Jira credential setup flow.
 func runCredentials() {
 	fs := flag.NewFlagSet("credentials", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.json", "path to config JSON file")
+	cfgPath := fs.String("config", defaultConfigPath(), "path to config JSON file")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, _ := config.Load(*cfgPath)
@@ -73,7 +73,7 @@ func runCredentials() {
 
 // runMain is the primary review-and-submit flow.
 func runMain() {
-	cfgPath := flag.String("config", "config.json", "path to config JSON file")
+	cfgPath := flag.String("config", defaultConfigPath(), "path to config JSON file")
 	from := flag.String("from", "", "start date YYYY-MM-DD (default: first day of current month)")
 	to := flag.String("to", "", "end date YYYY-MM-DD (default: last day of current month)")
 	targetFlag := flag.String("target", "", "override target: mock | mock-write | real")
@@ -311,3 +311,46 @@ func openURL(url string) {
 	}
 	_ = cmd.Start()
 }
+
+// defaultConfigPath returns the platform-appropriate default location for
+// config.json. On Windows this is %LOCALAPPDATA%\timereporting-assistant\config.json;
+// on other platforms ~/.config/timereporting-assistant/config.json.
+//
+// If an old-style config.json exists next to the binary (from a previous
+// install), it is migrated to the new location automatically.
+func defaultConfigPath() string {
+	dir := appDataDir()
+	_ = os.MkdirAll(dir, 0o700)
+	newPath := filepath.Join(dir, "config.json")
+
+	// Migrate old config.json next to the binary, if it exists and the new
+	// location is empty.
+	if _, err := os.Stat(newPath); os.IsNotExist(err) {
+		exe, err2 := os.Executable()
+		if err2 == nil {
+			old := filepath.Join(filepath.Dir(exe), "config.json")
+			if data, err3 := os.ReadFile(old); err3 == nil {
+				if err4 := os.WriteFile(newPath, data, 0o600); err4 == nil {
+					_ = os.Remove(old) // remove from install dir after migration
+					fmt.Printf("Migrated config from %s to %s\n", old, newPath)
+				}
+			}
+		}
+	}
+	return newPath
+}
+
+// appDataDir returns the OS-appropriate user application data directory.
+func appDataDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "timereporting-assistant")
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config", "timereporting-assistant")
+	}
+	return "."
+}
+
