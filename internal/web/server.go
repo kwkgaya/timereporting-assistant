@@ -370,9 +370,21 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var submitted []WlogView
+	// Build a set of comment fingerprints already in existing worklogs (from this
+	// tool) so re-runs don't double-submit the same row.
+	alreadyLogged := map[string]bool{}
+	for _, wl := range d.Existing {
+		if strings.Contains(wl.Comment, jira.WorklogMarker) {
+			alreadyLogged[wl.IssueKey+"|"+wl.Comment] = true
+		}
+	}
 	for _, wl := range d.Suggested {
 		if wl.IssueKey == "" || wl.Minutes <= 0 {
 			continue
+		}
+		fingerprint := wl.IssueKey + "|" + wl.Comment
+		if alreadyLogged[fingerprint] {
+			continue // idempotent: don't re-submit the same worklog
 		}
 		if !body.DryRun {
 			if _, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
@@ -380,6 +392,7 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 					fmt.Sprintf("submit %s: %v", wl.IssueKey, err))
 				return
 			}
+			alreadyLogged[fingerprint] = true
 		}
 		submitted = append(submitted, wl)
 	}
