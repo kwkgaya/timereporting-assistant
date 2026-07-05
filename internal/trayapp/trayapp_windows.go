@@ -52,10 +52,10 @@ func onReady(version, cfgPath string) {
 
 	cfg, _ := config.Load(cfgPath)
 	if cfg.WebPort == 0 {
-		cfg.WebPort = 8080
+		cfg.WebPort = 9080
 	}
 	if cfg.MockJiraPort == 0 {
-		cfg.MockJiraPort = 8099
+		cfg.MockJiraPort = 9099
 	}
 
 	// Record first-launch-today time.

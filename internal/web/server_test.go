@@ -39,7 +39,7 @@ func makeTestServer(t *testing.T) (*Server, *httptest.Server) {
 			},
 		},
 	}
-	srv := New(plans, client, nil, "mock", 8080)
+	srv := New(plans, client, nil, "mock", 9080)
 	return srv, ts
 }
 
@@ -224,7 +224,7 @@ func TestTargetSwitchToRealWithClient(t *testing.T) {
 			{IssueKey: "EDB-100", Minutes: 420, Comment: "Work", Category: model.CategoryActivity, Started: model.WorklogStart(jun1)},
 		},
 	}}
-	srv := New(plans, mockClient, realClient, "mock-write", 8080)
+	srv := New(plans, mockClient, realClient, "mock-write", 9080)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

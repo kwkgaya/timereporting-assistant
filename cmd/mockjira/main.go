@@ -15,7 +15,7 @@ import (
 var version = "dev"
 
 func main() {
-	port := flag.Int("port", 8099, "port to listen on")
+	port := flag.Int("port", 9099, "port to listen on")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 

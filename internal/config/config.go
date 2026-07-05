@@ -65,8 +65,8 @@ func Default() Config {
 		LeaveIssueKey:   "EDB-9070",
 		WorkdayHours:    7,
 		GitHub:          GitHubConfig{APIBaseURL: "https://api.github.com"},
-		MockJiraPort:    8099,
-		WebPort:         8080,
+		MockJiraPort:    9099,
+		WebPort:         9080,
 		Target:          TargetMock,
 	}
 }

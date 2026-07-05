@@ -55,7 +55,7 @@ top-up math correct, but nothing is written to the real system.
 ### Mock Jira (implemented, [#2], [#10])
 - SQLite-backed (fresh DB each start; re-seeds `EDB-9070`, `EDB-9071`, `EDB-100/200/300`).
 - Implements the REST subset above.
-- Inspect UI at `http://localhost:8099` with **issue search** (by key or title) and a
+- Inspect UI at `http://localhost:9099` with **issue search** (by key or title) and a
   **weekly timelog view** (Mon–Fri grid, per-issue minutes, day totals, prev/next navigation).
 
 ### Future auth option (not built)

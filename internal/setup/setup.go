@@ -83,8 +83,8 @@ func RunConfigWizard(cfgPath string, existing config.Config) (config.Config, err
 	cfg.ICSPath = prompt("Path to .ics calendar export (blank to skip)", cfg.ICSPath, "")
 
 	// Ports.
-	cfg.MockJiraPort = promptInt("Mock Jira port", cfg.MockJiraPort, 8099)
-	cfg.WebPort = promptInt("Review UI port", cfg.WebPort, 8080)
+	cfg.MockJiraPort = promptInt("Mock Jira port", cfg.MockJiraPort, 9099)
+	cfg.WebPort = promptInt("Review UI port", cfg.WebPort, 9080)
 
 	// Summary + confirm.
 	fmt.Println()

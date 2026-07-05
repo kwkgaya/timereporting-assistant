@@ -20,10 +20,10 @@ go test ./...
 
 ### Run — safe offline mode (no credentials)
 ```powershell
-# Terminal 1 — mock Jira (inspect page at http://localhost:8099)
+# Terminal 1 — mock Jira (inspect page at http://localhost:9099)
 go run ./cmd/mockjira
 
-# Terminal 2 — assistant (review UI at http://localhost:8080)
+# Terminal 2 — assistant (review UI at http://localhost:9080)
 go run ./cmd/timeporting --from 2026-06-01 --to 2026-06-30 --target mock
 ```
 
@@ -46,9 +46,9 @@ First run triggers the **config wizard**, then the **credential setup flow** if 
   - `GITHUB_TOKEN`
 - Key config fields: `jira.baseUrl`, `jira.email`, `meetingIssueKey` (EDB-9071),
   `leaveIssueKey` (EDB-9070), `workdayHours` (7), `localRepos[]`, `gitAuthors[]`, `icsPath`,
-  `github.username`, `mockJiraPort` (8099), `webPort` (8080), `target`.
+  `github.username`, `mockJiraPort` (9099), `webPort` (9080), `target`.
 
-### Using the review UI (http://localhost:8080)
+### Using the review UI (http://localhost:9080)
 - Left panel: all days, with total-vs-7h indicator (green = met).
 - Per day: edit issue key / minutes / comment per row, add/delete rows, assign unassigned items,
   set day status (working/holiday/full leave/half leave), **Clone previous day**.

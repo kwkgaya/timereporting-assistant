@@ -18,7 +18,7 @@
     "you@example.com"
   ],
   "icsPath": "data/calendar.ics",
-  "mockJiraPort": 8099,
-  "webPort": 8080,
+  "mockJiraPort": 9099,
+  "webPort": 9080,
   "target": "mock"
 }

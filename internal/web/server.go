@@ -1214,6 +1214,18 @@ a{color:#0052cc}
   <label>Outlook calendar .ics export — optional</label>
   <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics">
   <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged first before other tasks.</div>
+  <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change ports (default 9080 / 9099)</summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+    <div>
+      <label>Review UI port</label>
+      <input type="number" id="w-webPort" value="9080" min="1024" max="65535">
+    </div>
+    <div>
+      <label>Mock Jira port</label>
+      <input type="number" id="w-mockPort" value="9099" min="1024" max="65535">
+    </div>
+  </div>
+  </details>
   <div class="error" id="err-5"></div>
   <div class="btn-row">
     <button class="btn-secondary" onclick="goTo(4)">← Back</button>
@@ -1299,7 +1311,12 @@ async function saveReposAndFinish(){
   const ics=document.getElementById('w-ics').value.trim();
   goTo(6);
   try{
-    await api('PUT','/config',{localRepos:repos,gitAuthors:authors,icsPath:ics,workdayHours:7,target:'mock'});
+    await api('PUT','/config',{
+      localRepos:repos, gitAuthors:authors, icsPath:ics,
+      workdayHours:7, target:'mock',
+      webPort:+(document.getElementById('w-webPort').value||9080),
+      mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
+    });
     const res=await api('POST','/reload');
     document.getElementById('done-msg').textContent='Plans built for '+res.rebuilt+' days. You\'re ready!';
     document.getElementById('btn-go').disabled=false;
@@ -1554,8 +1571,8 @@ async function loadConfig() {
     document.getElementById('localRepos').value = (c.localRepos||[]).join('\n');
     document.getElementById('gitAuthors').value = (c.gitAuthors||[]).join(', ');
     document.getElementById('workdayHours').value = c.workdayHours||7;
-    document.getElementById('webPort').value = c.webPort||8080;
-    document.getElementById('mockJiraPort').value = c.mockJiraPort||8099;
+    document.getElementById('webPort').value = c.webPort||9080;
+    document.getElementById('mockJiraPort').value = c.mockJiraPort||9099;
     document.getElementById('target').value = c.target||'mock';
   } catch(e) { toast('Could not load config: '+e.message, true); }
 }

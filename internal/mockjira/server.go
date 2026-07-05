@@ -604,7 +604,7 @@ td.summary{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:no
     </tbody>
   </table>
   {{else}}
-  <p class="empty-week">No worklogs found for this week. Submit some from the <a href="http://localhost:8080">review UI</a>.</p>
+  <p class="empty-week">No worklogs found for this week. Submit some from the <a href="http://localhost:9080">review UI</a>.</p>
   {{end}}
 </section>
 
