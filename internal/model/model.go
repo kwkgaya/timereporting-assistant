@@ -69,6 +69,7 @@ type Worklog struct {
 	Comment  string          // worklog comment
 	Category WorklogCategory // origin
 	Started  time.Time       // day at 12:00:00 UTC
+	Author   string          // email of the author (set for existing worklogs read from Jira)
 }
 
 // DayPlan is the full proposed timesheet for a single day.
