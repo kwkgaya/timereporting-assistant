@@ -395,7 +395,7 @@ func validateJiraToken(baseURL, email, token string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("invalid credentials (status %d) — check email and token", resp.StatusCode)
+		return fmt.Errorf("authentication failed (status %d) — verify that '%s' is the email shown at id.atlassian.com/manage-profile (not your work email), and that the token was copied in full", resp.StatusCode, email)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d from Jira", resp.StatusCode)
@@ -1194,6 +1194,11 @@ a{color:#0052cc}
   <h2>Jira API token</h2>
   <p class="subtitle">A <strong>scoped token</strong> lets the tool read and write your worklogs — nothing else.
   <a href="/guide/jira-token" target="_blank">How to create one →</a></p>
+  <p style="font-size:.82rem;background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:8px 12px;margin-bottom:12px">
+    ⚠ The email must be your <strong>Atlassian account email</strong> — check it at
+    <a href="https://id.atlassian.com/manage-profile" target="_blank">id.atlassian.com/manage-profile</a>.
+    It may differ from your work email.
+  </p>
   <label>Scoped API token *</label>
   <div class="input-row">
     <input type="password" id="w-jiraToken" placeholder="Paste token here" oninput="clearErr('err-3')">
