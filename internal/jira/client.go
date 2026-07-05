@@ -20,7 +20,7 @@ import (
 
 // WorklogMarker is appended to comments this tool writes, so re-runs can detect
 // worklogs it already created and avoid duplicating them.
-const WorklogMarker = "[timeporting]"
+const WorklogMarker = "[timereporting]"
 
 // jiraTimeLayout matches the "started" timestamp format Jira expects/returns,
 // e.g. 2026-06-01T12:00:00.000+0000.

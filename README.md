@@ -30,7 +30,7 @@ default; real Jira is only used when you explicitly switch the target.
 ## Layout
 
 ```
-cmd/timeporting   CLI + local web review UI
+cmd/timereporting   CLI + local web review UI
 cmd/mockjira      Mock Jira server (safe write target)
 internal/config   Config loader (JSON file + env secrets)
 internal/model    Domain types
