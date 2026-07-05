@@ -40,18 +40,24 @@ type WlogView struct {
 	Submitted bool   `json:"submitted,omitempty"` // true once individually submitted
 }
 
+// PlanBuilder is a function that builds a fresh set of day plans from the
+// current config. It is called at startup and again whenever the user triggers
+// a reload from the settings page.
+type PlanBuilder func(cfg config.Config) ([]model.DayPlan, *jira.Client, *jira.Client, error)
+
 // Server holds the state for the web review session.
 type Server struct {
-	mu          sync.Mutex
-	days        []DayView      // ordered by date
-	dayIndex    map[string]int // date -> index
-	mockClient  *jira.Client   // writes to the mock server
-	realClient  *jira.Client   // writes to real Jira; nil when no credentials
-	activeWrite string         // "mock" | "real" — where submits currently go
-	readSource  string         // display label for where existing worklogs were read
-	port        int
-	cfg         config.Config // current config (for settings page)
-	cfgPath     string        // path to config.json (for saving)
+	mu           sync.Mutex
+	days         []DayView      // ordered by date
+	dayIndex     map[string]int // date -> index
+	mockClient   *jira.Client   // writes to the mock server
+	realClient   *jira.Client   // writes to real Jira; nil when no credentials
+	activeWrite  string         // "mock" | "real" — where submits currently go
+	readSource   string         // display label for where existing worklogs were read
+	port         int
+	cfg          config.Config // current config (for settings page)
+	cfgPath      string        // path to config.json (for saving)
+	planBuilder  PlanBuilder   // called on reload to rebuild day plans
 }
 
 // New creates a Server. mockClient always writes to the mock; realClient (may be
@@ -90,6 +96,14 @@ func (s *Server) WithConfig(cfg config.Config, cfgPath string) *Server {
 	return s
 }
 
+// WithPlanBuilder attaches the plan-builder function used on reload.
+func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
+	s.mu.Lock()
+	s.planBuilder = fn
+	s.mu.Unlock()
+	return s
+}
+
 // writeClient returns the jira client for the current active write target.
 func (s *Server) writeClient() (*jira.Client, string, error) {
 	if s.activeWrite == "real" {
@@ -109,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/target", s.apiPutTarget)
 	mux.HandleFunc("GET /api/config", s.apiGetConfig)
 	mux.HandleFunc("PUT /api/config", s.apiPutConfig)
+	mux.HandleFunc("POST /api/reload", s.apiReload)
 	mux.HandleFunc("GET /api/credentials/status", s.apiCredentialStatus)
 	mux.HandleFunc("POST /api/credentials/jira", s.apiSetJiraCredentials)
 	mux.HandleFunc("POST /api/credentials/github", s.apiSetGitHubCredentials)
@@ -210,6 +225,47 @@ func saveConfigFile(path string, cfg config.Config) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func (s *Server) apiReload(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	builder := s.planBuilder
+	cfg := s.cfg
+	s.mu.Unlock()
+
+	if builder == nil {
+		writeErr(w, http.StatusServiceUnavailable, "plan builder not configured; restart the app")
+		return
+	}
+
+	plans, mockClient, realClient, err := builder(cfg)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "rebuild plans: "+err.Error())
+		return
+	}
+
+	// Rebuild the day index with the new plans.
+	newDays := make([]DayView, 0, len(plans))
+	newIndex := map[string]int{}
+	for _, p := range plans {
+		key := p.Date.Format("2006-01-02")
+		view := planToView(p)
+		newIndex[key] = len(newDays)
+		newDays = append(newDays, view)
+	}
+
+	s.mu.Lock()
+	s.days = newDays
+	s.dayIndex = newIndex
+	if mockClient != nil {
+		s.mockClient = mockClient
+	}
+	if realClient != nil {
+		s.realClient = realClient
+	}
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"rebuilt": len(plans), "status": "ok"})
 }
 
 func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
@@ -998,6 +1054,7 @@ button.secondary:hover{background:#f4f5f7}
     </div>
   </div>
   <button class="primary" onclick="saveConfig()">Save settings</button>
+  <button class="primary" style="background:#00875a;margin-left:8px" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
   <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
 </section>
 
@@ -1118,6 +1175,20 @@ async function saveGHCreds() {
     toast('GitHub token saved.');
     await loadCredStatus();
   } catch(e) { toast(e.message, true); }
+}
+
+async function saveAndRebuild() {
+  await saveConfig();
+  const msg = document.getElementById('cfg-msg');
+  msg.textContent = 'Rebuilding plans…'; msg.style.color = '#6b778c';
+  try {
+    const res = await api('POST','/reload');
+    msg.textContent = '✅ Plans rebuilt ('+res.rebuilt+' days). ';
+    msg.style.color = '#00875a';
+    const a = document.createElement('a');
+    a.href = '/'; a.textContent = 'Go to time report →';
+    document.getElementById('cfg-msg').appendChild(a);
+  } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
 }
 
 loadConfig(); loadCredStatus();

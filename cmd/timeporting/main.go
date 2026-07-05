@@ -167,54 +167,65 @@ func runMain() {
 		// mock-write/real selected but no creds yet; fall back to mock reads.
 		readClient = mockClient
 	}
+	_ = readClient // readClient is now handled inside buildPlans
 
-	// ── Read existing worklogs ─────────────────────────────────────────────
-	existingByDay, err := readClient.ExistingWorklogsByDay(cfg.Jira.Email, startDate, endDate)
-	if err != nil {
-		log.Printf("warning: could not read existing worklogs: %v", err)
-		existingByDay = map[string][]model.Worklog{}
-	}
-
-	// ── ICS meetings ───────────────────────────────────────────────────────
-	var allMeetings []model.Meeting
-	if cfg.ICSPath != "" {
-		allMeetings, err = ics.ParseFile(cfg.ICSPath)
-		if err != nil {
-			log.Printf("warning: could not parse ICS file %q: %v", cfg.ICSPath, err)
-		} else {
-			fmt.Printf("Loaded %d calendar events from %s\n", len(allMeetings), cfg.ICSPath)
+	// ── Build day plans (also used by the /api/reload endpoint) ──────────────
+	buildPlans := func(c config.Config) ([]model.DayPlan, *jira.Client, *jira.Client, error) {
+		mb := jira.NewClient(fmt.Sprintf("http://localhost:%d", c.MockJiraPort), "", "")
+		var rb *jira.Client
+		if c.Jira.BaseURL != "" && c.JiraAPIToken != "" {
+			rb = jira.NewClient(c.Jira.BaseURL, c.Jira.Email, c.JiraAPIToken)
 		}
-	}
 
-	// ── Activity collectors ────────────────────────────────────────────────
-	gitCollector := activity.NewGitCollector(cfg.LocalRepos, cfg.GitAuthors)
-	var ghCollector *activity.GitHubCollector
-	if cfg.GitHub.Username != "" {
-		ghCollector = activity.NewGitHubCollector(cfg.GitHub.APIBaseURL, cfg.GitHub.Username, cfg.GitHubToken)
-	}
-
-	// ── Build day plans ────────────────────────────────────────────────────
-	engCfg := engine.DefaultConfig(cfg.WorkdayHours, cfg.MeetingIssueKey, cfg.LeaveIssueKey)
-	plans := make([]model.DayPlan, 0, len(days))
-	for _, day := range days {
-		dayKey := day.Format("2006-01-02")
-		existing := existingByDay[dayKey]
-		meetingMins := ics.TotalMinutesForDay(allMeetings, day)
-
-		var acts []model.Activity
-		localActs, _ := gitCollector.CollectForDay(day)
-		acts = append(acts, localActs...)
-		if ghCollector != nil {
-			ghActs, _ := ghCollector.CollectForDay(day)
-			acts = append(acts, ghActs...)
+		var rc *jira.Client // read client
+		switch c.Target {
+		case config.TargetReal, config.TargetMockWrite:
+			rc = rb
 		}
-		plan := engine.BuildDayPlan(engCfg, day, model.StatusWorking, existing, meetingMins, acts)
-		plans = append(plans, plan)
+		if rc == nil {
+			rc = mb
+		}
+
+		existing, _ := rc.ExistingWorklogsByDay(c.Jira.Email, startDate, endDate)
+		if existing == nil {
+			existing = map[string][]model.Worklog{}
+		}
+
+		var meetings []model.Meeting
+		if c.ICSPath != "" {
+			meetings, _ = ics.ParseFile(c.ICSPath)
+		}
+
+		gc := activity.NewGitCollector(c.LocalRepos, c.GitAuthors)
+		var ghc *activity.GitHubCollector
+		if c.GitHub.Username != "" {
+			ghc = activity.NewGitHubCollector(c.GitHub.APIBaseURL, c.GitHub.Username, c.GitHubToken)
+		}
+
+		ec := engine.DefaultConfig(c.WorkdayHours, c.MeetingIssueKey, c.LeaveIssueKey)
+		var ps []model.DayPlan
+		for _, day := range days {
+			dk := day.Format("2006-01-02")
+			ex := existing[dk]
+			mm := ics.TotalMinutesForDay(meetings, day)
+			var acts []model.Activity
+			la, _ := gc.CollectForDay(day)
+			acts = append(acts, la...)
+			if ghc != nil {
+				ga, _ := ghc.CollectForDay(day)
+				acts = append(acts, ga...)
+			}
+			ps = append(ps, engine.BuildDayPlan(ec, day, model.StatusWorking, ex, mm, acts))
+		}
+		return ps, mb, rb, nil
 	}
+
+	plans, mockClient, realClient, _ := buildPlans(cfg)
 
 	// ── Web review UI ──────────────────────────────────────────────────────
 	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
-		WithConfig(cfg, *cfgPath)
+		WithConfig(cfg, *cfgPath).
+		WithPlanBuilder(web.PlanBuilder(buildPlans))
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))
