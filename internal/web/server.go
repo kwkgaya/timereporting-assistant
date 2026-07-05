@@ -39,21 +39,28 @@ type Server struct {
 	mu          sync.Mutex
 	days        []DayView      // ordered by date
 	dayIndex    map[string]int // date -> index
-	jiraClient  *jira.Client   // write target
-	readTarget  string         // display label: "mock" / "real Jira"
-	writeTarget string         // display label: "mock" / "real Jira"
+	mockClient  *jira.Client   // writes to the mock server
+	realClient  *jira.Client   // writes to real Jira; nil when no credentials
+	activeWrite string         // "mock" | "real" — where submits currently go
+	readSource  string         // display label for where existing worklogs were read
 	port        int
 }
 
-// New creates a Server. client targets either the mock or real Jira depending
-// on target ("mock"/"mock-write"/"real"). Days is the ordered list of day plans to review.
-func New(plans []model.DayPlan, client *jira.Client, target string, port int) *Server {
-	read, write := targetLabels(target)
+// New creates a Server. mockClient always writes to the mock; realClient (may be
+// nil) writes to real Jira. target ("mock"/"mock-write"/"real") sets the initial
+// read-source label and active write target.
+func New(plans []model.DayPlan, mockClient, realClient *jira.Client, target string, port int) *Server {
+	readSource, _ := targetLabels(target)
+	activeWrite := "mock"
+	if target == "real" {
+		activeWrite = "real"
+	}
 	s := &Server{
 		dayIndex:    map[string]int{},
-		jiraClient:  client,
-		readTarget:  read,
-		writeTarget: write,
+		mockClient:  mockClient,
+		realClient:  realClient,
+		activeWrite: activeWrite,
+		readSource:  readSource,
 		port:        port,
 	}
 	for _, p := range plans {
@@ -65,10 +72,23 @@ func New(plans []model.DayPlan, client *jira.Client, target string, port int) *S
 	return s
 }
 
+// writeClient returns the jira client for the current active write target.
+func (s *Server) writeClient() (*jira.Client, string, error) {
+	if s.activeWrite == "real" {
+		if s.realClient == nil {
+			return nil, "", fmt.Errorf("no real Jira credentials configured")
+		}
+		return s.realClient, "Real Jira", nil
+	}
+	return s.mockClient, "Mock Jira", nil
+}
+
 // Handler returns the HTTP handler for the review UI.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.apiStatus)
+	mux.HandleFunc("GET /api/target", s.apiGetTarget)
+	mux.HandleFunc("PUT /api/target", s.apiPutTarget)
 	mux.HandleFunc("GET /api/days", s.apiGetDays)
 	mux.HandleFunc("GET /api/days/{date}", s.apiGetDay)
 	mux.HandleFunc("PUT /api/days/{date}", s.apiPutDay)
@@ -80,9 +100,48 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
-	r, wt := s.readTarget, s.writeTarget
-	s.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]string{"read": r, "write": wt})
+	defer s.mu.Unlock()
+	_, write, _ := s.writeClient()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"read":          s.readSource,
+		"write":         write,
+		"activeWrite":   s.activeWrite,
+		"realAvailable": s.realClient != nil,
+	})
+}
+
+func (s *Server) apiGetTarget(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"activeWrite":   s.activeWrite,
+		"realAvailable": s.realClient != nil,
+	})
+}
+
+func (s *Server) apiPutTarget(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Target != "mock" && body.Target != "real" {
+		writeErr(w, http.StatusBadRequest, `target must be "mock" or "real"`)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if body.Target == "real" && s.realClient == nil {
+		writeErr(w, http.StatusBadRequest, "real Jira has no credentials configured; run 'timeporting credentials'")
+		return
+	}
+	s.activeWrite = body.Target
+	writeJSON(w, http.StatusOK, map[string]any{
+		"activeWrite":   s.activeWrite,
+		"realAvailable": s.realClient != nil,
+	})
 }
 
 // targetLabels returns human-readable read/write labels for a target string.
@@ -195,13 +254,21 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	}
 	started := model.WorklogStart(day)
 
+	s.mu.Lock()
+	client, writeLabel, cerr := s.writeClient()
+	s.mu.Unlock()
+	if cerr != nil {
+		writeErr(w, http.StatusBadRequest, cerr.Error())
+		return
+	}
+
 	var submitted []WlogView
 	for _, wl := range d.Suggested {
 		if wl.IssueKey == "" || wl.Minutes <= 0 {
 			continue
 		}
 		if !body.DryRun {
-			if _, err := s.jiraClient.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
+			if _, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
 				writeErr(w, http.StatusInternalServerError,
 					fmt.Sprintf("submit %s: %v", wl.IssueKey, err))
 				return
@@ -219,7 +286,7 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"submitted": submitted,
 		"dryRun":    body.DryRun,
-		"target":    s.writeTarget,
+		"target":    writeLabel,
 	})
 }
 
@@ -351,6 +418,13 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 <header>
   <h1>Timereporting Assistant</h1>
   <span id="target-badge" class="badge">loading…</span>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+    <label for="write-target" style="font-size:.8rem">Submit to:</label>
+    <select id="write-target" onchange="setWriteTarget(this.value)" style="font-size:.8rem">
+      <option value="mock">Mock Jira</option>
+      <option value="real">Real Jira</option>
+    </select>
+  </span>
 </header>
 <main>
   <div id="day-list"></div>
@@ -561,16 +635,35 @@ async function refresh(date) {
   if (currentDate===date) renderDetail(day);
 }
 
+async function refreshBadge() {
+  const status = await api('GET','/status');
+  const badge = document.getElementById('target-badge');
+  badge.textContent = 'Read: ' + status.read + ' | Write: ' + status.write;
+  badge.style.background = status.activeWrite === 'real' ? '#de350b' : '#0747a6';
+  const sel = document.getElementById('write-target');
+  sel.value = status.activeWrite;
+  // Disable the Real option when no credentials are available.
+  sel.querySelector('option[value="real"]').disabled = !status.realAvailable;
+}
+
+async function setWriteTarget(target) {
+  if (target === 'real' && !confirm('Submit worklogs to REAL Jira? This writes to your actual timesheet.')) {
+    await refreshBadge();
+    return;
+  }
+  try {
+    await api('PUT','/target',{target});
+    await refreshBadge();
+    toast('Submit target set to ' + (target==='real'?'Real Jira':'Mock Jira') + '.');
+  } catch(e) {
+    toast(e.message, true);
+    await refreshBadge();
+  }
+}
+
 async function init() {
   try {
-    const status = await api('GET','/status');
-    const badge = document.getElementById('target-badge');
-    if (status.read === status.write) {
-      badge.textContent = '→ ' + status.write;
-    } else {
-      badge.textContent = 'Read: ' + status.read + ' | Write: ' + status.write;
-    }
-    if (status.write === 'Real Jira') badge.style.background = '#de350b';
+    await refreshBadge();
     days = await api('GET','/days');
     renderList();
     if (days.length) selectDay(days[0].date);

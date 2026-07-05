@@ -153,18 +153,25 @@ func runMain() {
 	}
 
 	var readClient *jira.Client  // for fetching existing worklogs
-	var writeClient *jira.Client // for submitting new worklogs
+	var mockClient *jira.Client  // always writes to the mock
+	var realClient *jira.Client  // writes to real Jira; nil when no credentials
+
+	mockClient = jira.NewClient(mockBase, "", "")
+	if cfg.Jira.BaseURL != "" && cfg.JiraAPIToken != "" {
+		realClient = jira.NewClient(cfg.Jira.BaseURL, cfg.Jira.Email, cfg.JiraAPIToken)
+	}
 
 	switch cfg.Target {
 	case config.TargetReal:
-		readClient = jira.NewClient(cfg.Jira.BaseURL, cfg.Jira.Email, cfg.JiraAPIToken)
-		writeClient = readClient
+		readClient = realClient
 	case config.TargetMockWrite:
-		readClient = jira.NewClient(cfg.Jira.BaseURL, cfg.Jira.Email, cfg.JiraAPIToken)
-		writeClient = jira.NewClient(mockBase, "", "")
+		readClient = realClient
 	default: // mock
-		readClient = jira.NewClient(mockBase, "", "")
-		writeClient = readClient
+		readClient = mockClient
+	}
+	if readClient == nil {
+		// mock-write/real selected but no creds yet; fall back to mock reads.
+		readClient = mockClient
 	}
 
 	// ── Read existing worklogs ─────────────────────────────────────────────
@@ -212,7 +219,7 @@ func runMain() {
 	}
 
 	// ── Web review UI ──────────────────────────────────────────────────────
-	webSrv := web.New(plans, writeClient, cfg.Target, cfg.WebPort)
+	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort)
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))

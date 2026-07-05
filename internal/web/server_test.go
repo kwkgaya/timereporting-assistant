@@ -39,7 +39,7 @@ func makeTestServer(t *testing.T) (*Server, *httptest.Server) {
 			},
 		},
 	}
-	srv := New(plans, client, "mock", 8080)
+	srv := New(plans, client, nil, "mock", 8080)
 	return srv, ts
 }
 
@@ -182,3 +182,76 @@ func readBody(r *http.Response) string {
 	_, _ = buf.ReadFrom(r.Body)
 	return buf.String()
 }
+
+func TestTargetSwitchRejectsRealWithoutClient(t *testing.T) {
+	srv, _ := makeTestServer(t) // real client is nil
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Switching to real must fail when no real client is configured.
+	body, _ := json.Marshal(map[string]any{"target": "real"})
+	resp, err := http.NewRequest(http.MethodPut, ts.URL+"/api/target", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, resp)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("switch to real without client: status = %d, want 400", rec.Code)
+	}
+	if srv.activeWrite != "mock" {
+		t.Errorf("activeWrite = %q, want mock", srv.activeWrite)
+	}
+}
+
+func TestTargetSwitchToRealWithClient(t *testing.T) {
+	// Build a server with a (fake) real client pointing at a second mock.
+	realMock := mockjira.NewDefault()
+	realTS := httptest.NewServer(realMock.Handler())
+	defer realTS.Close()
+	realClient := jira.NewClient(realTS.URL, "", "")
+
+	mockMock := mockjira.NewDefault()
+	mockTS := httptest.NewServer(mockMock.Handler())
+	defer mockTS.Close()
+	mockClient := jira.NewClient(mockTS.URL, "", "")
+
+	jun1 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	plans := []model.DayPlan{{
+		Date:   jun1,
+		Status: model.StatusWorking,
+		Suggested: []model.Worklog{
+			{IssueKey: "EDB-100", Minutes: 420, Comment: "Work", Category: model.CategoryActivity, Started: model.WorklogStart(jun1)},
+		},
+	}}
+	srv := New(plans, mockClient, realClient, "mock-write", 8080)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Switch to real.
+	body, _ := json.Marshal(map[string]any{"target": "real"})
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/target", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("switch to real: status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Submit → should hit the REAL mock, not the mock-write mock.
+	sbody, _ := json.Marshal(map[string]any{"dryRun": false})
+	resp, err := http.Post(ts.URL+"/api/days/2026-06-01/submit", "application/json", bytes.NewReader(sbody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("submit status = %d: %s", resp.StatusCode, readBody(resp))
+	}
+	if realMock.WorklogCount("EDB-100") != 1 {
+		t.Errorf("real target worklog count = %d, want 1", realMock.WorklogCount("EDB-100"))
+	}
+	if mockMock.WorklogCount("EDB-100") != 0 {
+		t.Errorf("mock target should be untouched, got %d", mockMock.WorklogCount("EDB-100"))
+	}
+}
+
