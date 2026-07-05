@@ -20,13 +20,21 @@ import (
 
 // DayView is the JSON shape the UI works with.
 type DayView struct {
-	Date      string     `json:"date"`      // YYYY-MM-DD
-	Weekday   string     `json:"weekday"`   // Monday …
-	Status    string     `json:"status"`    // working/holiday/full_leave/half_leave
-	Existing  []WlogView `json:"existing"`  // already in Jira (read-only)
-	Suggested []WlogView `json:"suggested"` // proposed; user edits these
-	Notes     []string   `json:"notes"`
-	Submitted bool       `json:"submitted"` // true after a successful Jira write
+	Date       string           `json:"date"`       // YYYY-MM-DD
+	Weekday    string           `json:"weekday"`    // Monday …
+	Status     string           `json:"status"`     // working/holiday/full_leave/half_leave
+	Existing   []WlogView       `json:"existing"`   // already in Jira (read-only)
+	Suggested  []WlogView       `json:"suggested"`  // proposed; user edits these
+	Unassigned []UnassignedView `json:"unassigned"` // activity with no Jira key
+	Notes      []string         `json:"notes"`
+	Submitted  bool             `json:"submitted"`  // true after a successful Jira write
+}
+
+// UnassignedView is an activity item that has no Jira key yet.
+type UnassignedView struct {
+	Source string `json:"source"`
+	Text   string `json:"text"`
+	Ref    string `json:"ref"`
 }
 
 // WlogView is a single worklog row in the UI.
@@ -788,13 +796,21 @@ func planToView(p model.DayPlan) DayView {
 		}
 		return out
 	}
+	toUnassigned := func(acts []model.Activity) []UnassignedView {
+		out := make([]UnassignedView, 0, len(acts))
+		for _, a := range acts {
+			out = append(out, UnassignedView{Source: a.Source, Text: a.Text, Ref: a.Ref})
+		}
+		return out
+	}
 	return DayView{
-		Date:      p.Date.Format("2006-01-02"),
-		Weekday:   p.Date.Weekday().String(),
-		Status:    string(p.Status),
-		Existing:  toViews(p.Existing),
-		Suggested: toViews(p.Suggested),
-		Notes:     p.Notes,
+		Date:       p.Date.Format("2006-01-02"),
+		Weekday:    p.Date.Weekday().String(),
+		Status:     string(p.Status),
+		Existing:   toViews(p.Existing),
+		Suggested:  toViews(p.Suggested),
+		Unassigned: toUnassigned(p.Unassigned),
+		Notes:      p.Notes,
 	}
 }
 
@@ -1358,6 +1374,21 @@ function renderDetail(day) {
     html += '<div class="notes">ℹ️ '+day.notes.join(' | ')+'</div><br>';
   }
 
+  // Unassigned activity + Revo prompt (#12)
+  if (day.unassigned && day.unassigned.length) {
+    html += '<details style="margin-bottom:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Revo</summary>';
+    html += '<div style="background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:10px 14px;margin-top:6px">';
+    html += '<table style="font-size:.82rem;width:100%;border-collapse:collapse;margin-bottom:8px">'
+      +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
+    day.unassigned.forEach(a => {
+      html += '<tr><td style="padding:3px 8px;color:#6b778c">'+esc(a.source)+'</td><td style="padding:3px 8px">'+esc(a.text)+'</td></tr>';
+    });
+    html += '</table>';
+    html += '<button class="secondary" style="font-size:.8rem" onclick="copyRevoPrompt(\''+day.date+'\')">📋 Copy Revo prompt</button>';
+    html += '<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Paste into Rovo AI in Jira to find the right task, then add rows above.</span>';
+    html += '</div></details>';
+  }
+
   // Existing worklogs (read-only)
   if (day.existing && day.existing.length) {
     html += '<strong>Already logged in Jira</strong>';
@@ -1449,6 +1480,20 @@ async function saveSuggested(date, suggested) {
     if (i>=0) days[i] = updated;
     renderList();
   } catch(e) { toast(e.message, true); }
+}
+
+function copyRevoPrompt(date) {
+  const day = days.find(d=>d.date===date);
+  if (!day || !day.unassigned || !day.unassigned.length) return;
+  const items = day.unassigned.map(a => '- '+a.text+(a.ref?' ('+a.ref+')':'')).join('\n');
+  const text = 'On '+date+' I worked on the following (the commits/PRs below have no clear Jira task key):\n'+items+'\n\nWhich Jira task(s) in my active projects should I log time against for these activities?';
+  navigator.clipboard.writeText(text).then(
+    () => toast('Revo prompt copied to clipboard — paste into Rovo AI in Jira.'),
+    () => {
+      // Fallback: show in a prompt for manual copy.
+      window.prompt('Copy this prompt and paste into Rovo AI in Jira:', text);
+    }
+  );
 }
 
 async function updateExisting(date, id, issueKey, minutes, comment) {

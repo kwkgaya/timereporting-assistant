@@ -146,3 +146,87 @@ func TestGitCollector_BadRepoSkipped(t *testing.T) {
 		t.Errorf("expected no activity from bad repo, got %+v", acts)
 	}
 }
+
+func TestGitCollector_MultiCloneDedup(t *testing.T) {
+	// Two dirs that are copies of the same repo (same commits, different paths).
+	// The collector must only count each commit once.
+	repo1 := initTempRepo(t)
+	// Clone repo1 into a second dir.
+	repo2 := t.TempDir()
+	if out, err := exec.Command("git", "clone", repo1, repo2).CombinedOutput(); err != nil {
+		t.Skipf("git clone failed: %v\n%s", err, out)
+	}
+
+	c := NewGitCollector([]string{repo1, repo2}, []string{"dev@example.com"})
+	day := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
+	acts, err := c.CollectForDay(day)
+	if err != nil {
+		t.Fatalf("CollectForDay: %v", err)
+	}
+	// Should be exactly 1 — the commit exists in both clones but same origin.
+	if len(acts) != 1 {
+		t.Errorf("multi-clone dedup: got %d activities, want 1; %+v", len(acts), acts)
+	}
+}
+
+func TestGitCollector_ReflogCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	dir := t.TempDir()
+	run := func(env []string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	base := os.Environ()
+	dateEnv := append(base,
+		"GIT_AUTHOR_DATE=2026-06-04T12:00:00+0000",
+		"GIT_COMMITTER_DATE=2026-06-04T12:00:00+0000",
+		"GIT_AUTHOR_EMAIL=dev@example.com",
+		"GIT_AUTHOR_NAME=Dev",
+		"GIT_COMMITTER_EMAIL=dev@example.com",
+		"GIT_COMMITTER_NAME=Dev",
+	)
+
+	run(base, "init", "-b", "main")
+	run(base, "config", "user.email", "dev@example.com")
+	run(base, "config", "user.name", "Dev")
+
+	// Commit on main.
+	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	run(base, "add", ".")
+	run(dateEnv, "commit", "-m", "EDB-100 main commit")
+
+	// Detached HEAD commit (will only be in reflog, not in --all after checkout).
+	run(base, "checkout", "--detach")
+	_ = os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644)
+	run(base, "add", ".")
+	run(dateEnv, "commit", "-m", "EDB-200 detached-head work")
+	// Go back to main — the detached commit is now orphaned (not in --all).
+	run(base, "checkout", "main")
+
+	c := NewGitCollector([]string{dir}, []string{"dev@example.com"})
+	day := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
+	acts, err := c.CollectForDay(day)
+	if err != nil {
+		t.Fatalf("CollectForDay: %v", err)
+	}
+
+	// Should find both commits: one from --all, one from reflog.
+	texts := make(map[string]bool)
+	for _, a := range acts {
+		texts[a.Text] = true
+	}
+	if !texts["EDB-100 main commit"] {
+		t.Error("missing main branch commit in results")
+	}
+	if !texts["EDB-200 detached-head work"] {
+		t.Errorf("missing reflog-only commit; got acts: %+v", acts)
+	}
+}
+

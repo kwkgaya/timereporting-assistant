@@ -19,11 +19,14 @@ import (
 
 // Source tag constants used in model.Activity.Source.
 const (
-	SourceGitHubCommit = "github-commit"
-	SourceGitHubPR     = "github-pr"
-	SourceGitHubReview = "github-review"
-	SourceLocalGit     = "local-git"
+	SourceGitHubCommit   = "github-commit"
+	SourceGitHubPR       = "github-pr"
+	SourceGitHubReview   = "github-review"
+	SourceLocalGit       = "local-git"
+	SourceLocalGitReflog = "local-git-reflog" // #16: commits only in reflog
 )
+
+// ── GitHub collector ─────────────────────────────────────────────────────────
 
 // GitHubCollector fetches activity from the GitHub REST v3 API.
 type GitHubCollector struct {
@@ -33,9 +36,7 @@ type GitHubCollector struct {
 	http     *http.Client
 }
 
-// NewGitHubCollector creates a collector. apiBase is normally
-// "https://api.github.com". token may be empty for public repos but is
-// required to read private repos and to avoid rate limits.
+// NewGitHubCollector creates a collector.
 func NewGitHubCollector(apiBase, username, token string) *GitHubCollector {
 	return &GitHubCollector{
 		apiBase:  strings.TrimRight(apiBase, "/"),
@@ -67,31 +68,22 @@ func (g *GitHubCollector) get(path string, out any) error {
 	return json.Unmarshal(body, out)
 }
 
-// CollectForDay returns the user's GitHub activity (commits on PRs, PR
-// open/merge events, PR review submissions) on a specific UTC day.
+// CollectForDay returns the user's GitHub activity on a specific UTC day.
 func (g *GitHubCollector) CollectForDay(day time.Time) ([]model.Activity, error) {
 	dayStr := day.UTC().Format("2006-01-02")
 	from := dayStr + "T00:00:00Z"
 	to := dayStr + "T23:59:59Z"
 
 	var acts []model.Activity
-
-	// PRs created or merged by the user on this day.
-	prs, err := g.searchPRs(fmt.Sprintf("author:%s created:%s..%s", g.username, from, to))
-	if err == nil {
+	if prs, err := g.searchPRs(fmt.Sprintf("author:%s created:%s..%s", g.username, from, to)); err == nil {
 		acts = append(acts, prs...)
 	}
-	merged, err := g.searchPRs(fmt.Sprintf("author:%s merged:%s..%s", g.username, from, to))
-	if err == nil {
+	if merged, err := g.searchPRs(fmt.Sprintf("author:%s merged:%s..%s", g.username, from, to)); err == nil {
 		acts = append(acts, merged...)
 	}
-
-	// PR reviews submitted on this day.
-	reviews, err := g.searchReviews(dayStr)
-	if err == nil {
+	if reviews, err := g.searchReviews(dayStr); err == nil {
 		acts = append(acts, reviews...)
 	}
-
 	return dedupe(acts), nil
 }
 
@@ -99,7 +91,7 @@ type prItem struct {
 	HTMLURL string `json:"html_url"`
 	Title   string `json:"title"`
 	Head    struct {
-		Ref string `json:"ref"` // branch name
+		Ref string `json:"ref"`
 	} `json:"head"`
 	CreatedAt string `json:"created_at"`
 }
@@ -115,8 +107,6 @@ func (g *GitHubCollector) searchPRs(query string) ([]model.Activity, error) {
 	if err := g.get("/search/issues?"+q.Encode(), &result); err != nil {
 		return nil, err
 	}
-	day := model.Day(time.Now().UTC()) // will be overridden per-item below
-	_ = day
 	var acts []model.Activity
 	for _, pr := range result.Items {
 		t, _ := time.Parse(time.RFC3339, pr.CreatedAt)
@@ -158,19 +148,7 @@ func (g *GitHubCollector) searchReviews(dayStr string) ([]model.Activity, error)
 	return acts, nil
 }
 
-// dedupe removes duplicate activities by Ref+Source.
-func dedupe(acts []model.Activity) []model.Activity {
-	seen := map[string]bool{}
-	out := make([]model.Activity, 0, len(acts))
-	for _, a := range acts {
-		key := a.Source + "|" + a.Ref
-		if !seen[key] {
-			seen[key] = true
-			out = append(out, a)
-		}
-	}
-	return out
-}
+// ── Local git collector ───────────────────────────────────────────────────────
 
 // GitCollector scans local git repositories.
 type GitCollector struct {
@@ -186,30 +164,93 @@ func NewGitCollector(repoPaths, authors []string) *GitCollector {
 }
 
 // CollectForDay returns commit activity from all configured local repos for
-// the given UTC day, reading from all branches.
+// the given UTC day.
+//
+// Multi-clone dedup (#11): multiple clones of the same repo (same origin URL)
+// only contribute each commit hash once, regardless of how many local paths
+// host it.
+//
+// Reflog (#16): after scanning branches (--all), also scans the reflog to pick
+// up orphaned/rebased/detached-HEAD commits not reachable from any branch.
 func (g *GitCollector) CollectForDay(day time.Time) ([]model.Activity, error) {
 	after := day.UTC().Format("2006-01-02") + " 00:00:00"
 	before := day.UTC().Format("2006-01-02") + " 23:59:59"
 
+	// Group repo paths by their origin remote URL to detect clones.
+	// Repos without a readable origin are treated as independent.
+	originGroups := g.groupByOrigin()
+
+	seenHash := map[string]bool{} // global hash dedup across all repos/clones
 	var all []model.Activity
-	for _, repo := range g.repoPaths {
-		acts, err := g.collectRepo(repo, after, before)
-		if err != nil {
-			// Don't fail if one repo can't be read (may not be a git repo).
-			continue
+
+	// Process one canonical representative per origin group.
+	for _, paths := range originGroups {
+		// All paths in the group are clones of the same repo.
+		// Collect from all of them but deduplicate by commit hash.
+		for _, repo := range paths {
+			acts, hashes, err := g.collectRepo(repo, after, before, seenHash)
+			if err != nil {
+				continue
+			}
+			for h := range hashes {
+				seenHash[h] = true
+			}
+			all = append(all, acts...)
 		}
-		all = append(all, acts...)
+
+		// #16: scan reflog of the first accessible path for orphaned commits.
+		for _, repo := range paths {
+			reflogActs, err := g.collectReflog(repo, after, before, seenHash)
+			if err != nil {
+				continue
+			}
+			// Mark reflog hashes as seen so subsequent paths don't re-add them.
+			for _, a := range reflogActs {
+				if h := extractHash(a.Ref); h != "" {
+					seenHash[h] = true
+				}
+			}
+			all = append(all, reflogActs...)
+			break // only need reflog from one clone per origin group
+		}
 	}
+
 	return dedupe(all), nil
 }
 
-func (g *GitCollector) collectRepo(repoPath, after, before string) ([]model.Activity, error) {
+// groupByOrigin maps origin remote URL → list of repo paths sharing that
+// origin. Repos without a readable origin get a unique key (the path itself).
+func (g *GitCollector) groupByOrigin() map[string][]string {
+	groups := map[string][]string{}
+	for _, path := range g.repoPaths {
+		origin := g.remoteURL(path)
+		if origin == "" {
+			origin = "__local__:" + path // treat as unique
+		}
+		groups[origin] = append(groups[origin], path)
+	}
+	return groups
+}
+
+// remoteURL returns the fetch URL of the "origin" remote, or "" on failure.
+func (g *GitCollector) remoteURL(repoPath string) string {
+	out, err := exec.Command(g.gitBin, "-C", repoPath, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// collectRepo scans one repo for commits on any branch matching the date range
+// and author filters. It returns activities and the set of full commit hashes
+// it found. Hashes already present in seenHash are skipped (multi-clone dedup).
+func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[string]bool) ([]model.Activity, map[string]bool, error) {
 	args := []string{
 		"-C", repoPath,
 		"log",
 		"--all",
 		"--no-merges",
-		"--format=%H%x1F%ae%x1F%s%x1F%D", // hash, author email, subject, decorations (branch refs)
+		"--format=%H%x1F%ae%x1F%s%x1F%D",
 		"--after=" + after,
 		"--before=" + before,
 	}
@@ -217,14 +258,15 @@ func (g *GitCollector) collectRepo(repoPath, after, before string) ([]model.Acti
 		args = append(args, "--author="+author)
 	}
 
-	cmd := exec.Command(g.gitBin, args...)
-	out, err := cmd.Output()
+	out, err := exec.Command(g.gitBin, args...).Output()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var acts []model.Activity
+	newHashes := map[string]bool{}
 	day := model.Day(mustParse(after))
+
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -234,11 +276,20 @@ func (g *GitCollector) collectRepo(repoPath, after, before string) ([]model.Acti
 		if len(parts) < 3 {
 			continue
 		}
-		hash := parts[0][:min(7, len(parts[0]))]
+		fullHash := parts[0]
+		if fullHash == "" {
+			continue
+		}
+		if seenHash[fullHash] || newHashes[fullHash] {
+			continue // already counted from another clone
+		}
+		newHashes[fullHash] = true
+
 		subject := parts[2]
-		ref := hash
+		shortHash := fullHash[:min(7, len(fullHash))]
+		ref := shortHash
 		if len(parts) == 4 && parts[3] != "" {
-			ref = parts[3] + " " + hash
+			ref = parts[3] + " " + shortHash
 		}
 		acts = append(acts, model.Activity{
 			Date:   day,
@@ -247,7 +298,97 @@ func (g *GitCollector) collectRepo(repoPath, after, before string) ([]model.Acti
 			Ref:    repoPath + " " + ref,
 		})
 	}
+	return acts, newHashes, nil
+}
+
+// collectReflog finds commits reachable via the reflog but NOT via --all
+// branches (orphaned/rebased/detached-HEAD work). Limited to commits whose
+// author date falls in [after, before] and matching the configured authors.
+func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash map[string]bool) ([]model.Activity, error) {
+	// git log -g: walks the reflog instead of commit ancestry.
+	// --format="%H %ae %aI %s" gives full-hash, author-email, ISO date, subject.
+	args := []string{
+		"-C", repoPath,
+		"log", "-g",
+		"--no-merges",
+		"--format=%H%x1F%ae%x1F%aI%x1F%s",
+		"--after=" + after,
+		"--before=" + before,
+	}
+	for _, a := range g.authors {
+		args = append(args, "--author="+a)
+	}
+
+	out, err := exec.Command(g.gitBin, args...).Output()
+	if err != nil {
+		return nil, err
+	}
+
+	day := model.Day(mustParse(after))
+	var acts []model.Activity
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x1f", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		fullHash := parts[0]
+		if fullHash == "" || len(fullHash) != 40 {
+			continue
+		}
+		// Skip commits already found via --all branches.
+		if seenHash[fullHash] {
+			continue
+		}
+		seenHash[fullHash] = true // mark so the same hash from another reflog entry is not re-added
+
+		subject := parts[3]
+		acts = append(acts, model.Activity{
+			Date:   day,
+			Source: SourceLocalGitReflog,
+			Text:   subject,
+			Ref:    repoPath + " " + fullHash[:min(7, len(fullHash))] + " (reflog)",
+		})
+	}
 	return acts, nil
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// dedupe removes duplicate activities by Ref+Source.
+func dedupe(acts []model.Activity) []model.Activity {
+	seen := map[string]bool{}
+	out := make([]model.Activity, 0, len(acts))
+	for _, a := range acts {
+		key := a.Source + "|" + a.Ref
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// extractHash returns the first 40-char hex token from a Ref string.
+func extractHash(ref string) string {
+	for _, part := range strings.Fields(ref) {
+		if len(part) == 40 {
+			allHex := true
+			for _, c := range part {
+				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					allHex = false
+					break
+				}
+			}
+			if allHex {
+				return part
+			}
+		}
+	}
+	return ""
 }
 
 func mustParse(s string) time.Time {
