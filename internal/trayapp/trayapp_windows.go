@@ -25,7 +25,7 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
 )
 
-//go:embed assets/icon.png
+//go:embed assets/icon.ico
 var appIconPNG []byte
 
 const (
