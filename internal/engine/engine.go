@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kwkgaya/timereporting-assistant/internal/ics"
 	"github.com/kwkgaya/timereporting-assistant/internal/jirakey"
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
@@ -22,17 +23,19 @@ const blockMinutes = 30 // smallest allocatable unit
 
 // Config holds the parameters the engine needs.
 type Config struct {
-	WorkdayMinutes  int    // normally 7*60 = 420
-	MeetingIssueKey string // e.g. EDB-9071
-	LeaveIssueKey   string // e.g. EDB-9070
+	WorkdayMinutes        int    // normally 7*60 = 420
+	MeetingIssueKey       string // e.g. EDB-9071
+	LeaveIssueKey         string // e.g. EDB-9070
+	LogMeetingsSeparately bool   // true = one worklog per meeting with its title
 }
 
 // DefaultConfig builds a Config from workday hours and the two special keys.
-func DefaultConfig(workdayHours float64, meetingKey, leaveKey string) Config {
+func DefaultConfig(workdayHours float64, meetingKey, leaveKey string, logMeetingsSeparately bool) Config {
 	return Config{
-		WorkdayMinutes:  int(workdayHours * 60),
-		MeetingIssueKey: meetingKey,
-		LeaveIssueKey:   leaveKey,
+		WorkdayMinutes:        int(workdayHours * 60),
+		MeetingIssueKey:       meetingKey,
+		LeaveIssueKey:         leaveKey,
+		LogMeetingsSeparately: logMeetingsSeparately,
 	}
 }
 
@@ -42,10 +45,10 @@ func DefaultConfig(workdayHours float64, meetingKey, leaveKey string) Config {
 //   - day: the date (midnight UTC)
 //   - status: working / holiday / leave …
 //   - existing: worklogs already in Jira for this day
-//   - meetingMins: total meeting minutes from the ICS for this day
+//   - meetings: calendar meetings for this day
 //   - activities: work signals for this day
 func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
-	existing []model.Worklog, meetingMins int, activities []model.Activity,
+	existing []model.Worklog, meetings []model.Meeting, activities []model.Activity,
 ) model.DayPlan {
 	plan := model.DayPlan{
 		Date:     model.Day(day),
@@ -99,17 +102,44 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 	}
 
 	// --- Meetings first ---
-	meetingAlloc := clamp(meetingMins, 0, remaining)
-	meetingAlloc = roundToBlock(meetingAlloc)
-	if meetingAlloc > 0 {
-		plan.Suggested = append(plan.Suggested, model.Worklog{
-			IssueKey: cfg.MeetingIssueKey,
-			Minutes:  meetingAlloc,
-			Comment:  fmt.Sprintf("Meetings (%s)", started.Format("2006-01-02")),
-			Category: model.CategoryMeeting,
-			Started:  started,
-		})
-		remaining -= meetingAlloc
+	if cfg.LogMeetingsSeparately {
+		// One worklog per meeting, using the meeting summary as comment.
+		for _, m := range meetings {
+			mins := roundToBlock(clamp(m.Minutes(), 0, remaining))
+			if mins <= 0 {
+				continue
+			}
+			comment := m.Summary
+			if comment == "" {
+				comment = fmt.Sprintf("Meeting (%s)", started.Format("2006-01-02"))
+			}
+			plan.Suggested = append(plan.Suggested, model.Worklog{
+				IssueKey: cfg.MeetingIssueKey,
+				Minutes:  mins,
+				Comment:  comment,
+				Category: model.CategoryMeeting,
+				Started:  started,
+			})
+			remaining -= mins
+			if remaining <= 0 {
+				break
+			}
+		}
+	} else {
+		// Aggregate all meetings into one worklog.
+		meetingMins := ics.TotalMinutesForDay(meetings, day)
+		meetingAlloc := clamp(meetingMins, 0, remaining)
+		meetingAlloc = roundToBlock(meetingAlloc)
+		if meetingAlloc > 0 {
+			plan.Suggested = append(plan.Suggested, model.Worklog{
+				IssueKey: cfg.MeetingIssueKey,
+				Minutes:  meetingAlloc,
+				Comment:  fmt.Sprintf("Meetings (%s)", started.Format("2006-01-02")),
+				Category: model.CategoryMeeting,
+				Started:  started,
+			})
+			remaining -= meetingAlloc
+		}
 	}
 
 	if remaining <= 0 {

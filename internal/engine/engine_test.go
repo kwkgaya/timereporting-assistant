@@ -1,4 +1,4 @@
-package engine
+﻿package engine
 
 import (
 	"testing"
@@ -7,9 +7,23 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
 
-var testCfg = DefaultConfig(7, "EDB-9071", "EDB-9070")
+var testCfg = DefaultConfig(7, "EDB-9071", "EDB-9070", false)
 
 var jun1 = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+// makeMeetings creates a slice with a single meeting of the given duration in minutes.
+func makeMeetings(mins int) []model.Meeting {
+	if mins <= 0 {
+		return nil
+	}
+	start := jun1.Add(9 * time.Hour) // 09:00 UTC
+	return []model.Meeting{{
+		Date:    jun1,
+		Start:   start,
+		End:     start.Add(time.Duration(mins) * time.Minute),
+		Summary: "Test meeting",
+	}}
+}
 
 func activity(text, ref string) model.Activity {
 	return model.Activity{Date: jun1, Source: "test", Text: text, Ref: ref}
@@ -29,7 +43,7 @@ func TestWorkingDayNoExistingNoMeetings(t *testing.T) {
 		activity("EDB-100 add widget", "feat/EDB-100"),
 		activity("EDB-200 fix bug", "fix/EDB-200"),
 	}
-	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, 0, acts)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, nil, acts)
 
 	total := plan.ExistingMinutes() + sumSuggested(plan)
 	if total != 420 {
@@ -48,7 +62,7 @@ func TestWorkingDayWithMeetings(t *testing.T) {
 		activity("EDB-100 work", "feat/EDB-100"),
 	}
 	// 90 min of meetings
-	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, 90, acts)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, makeMeetings(90), acts)
 
 	total := plan.ExistingMinutes() + sumSuggested(plan)
 	if total != 420 {
@@ -73,7 +87,7 @@ func TestTopUpExistingWorklogs(t *testing.T) {
 		{IssueKey: "EDB-100", Minutes: 180, Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},
 	}
 	acts := []model.Activity{activity("EDB-200 review", "EDB-200")}
-	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, existing, 0, acts)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, existing, nil, acts)
 
 	// Existing = 180 min. Should suggest 240 more to reach 420.
 	total := plan.TotalMinutes()
@@ -86,7 +100,7 @@ func TestTopUpExistingWorklogs(t *testing.T) {
 }
 
 func TestFullLeaveDay(t *testing.T) {
-	plan := BuildDayPlan(testCfg, jun1, model.StatusFullLeave, nil, 60, nil)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusFullLeave, nil, makeMeetings(60), nil)
 
 	if len(plan.Suggested) != 1 {
 		t.Fatalf("suggested len = %d, want 1", len(plan.Suggested))
@@ -102,7 +116,7 @@ func TestFullLeaveDay(t *testing.T) {
 
 func TestHalfLeaveDay(t *testing.T) {
 	acts := []model.Activity{activity("EDB-100 stuff", "EDB-100")}
-	plan := BuildDayPlan(testCfg, jun1, model.StatusHalfLeave, nil, 0, acts)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusHalfLeave, nil, nil, acts)
 
 	total := plan.TotalMinutes()
 	if total != 420 {
@@ -120,7 +134,7 @@ func TestHalfLeaveDay(t *testing.T) {
 }
 
 func TestNoActivityPreFillsLeaveTask(t *testing.T) {
-	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, 0, nil)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, nil, nil)
 
 	if len(plan.Suggested) != 1 {
 		t.Fatalf("suggested = %d, want 1 (leave task pre-fill)", len(plan.Suggested))
@@ -159,7 +173,7 @@ func TestAllocateDirect(t *testing.T) {
 		}
 		plan := BuildDayPlan(
 			Config{WorkdayMinutes: tc.totalMins, MeetingIssueKey: "MTG-1", LeaveIssueKey: "LVE-1"},
-			jun1, model.StatusWorking, nil, 0, acts,
+jun1, model.StatusWorking, nil, nil, acts,
 		)
 		total := sumSuggested(plan)
 		if total != tc.totalMins {
@@ -174,7 +188,7 @@ func TestAllocateDirect(t *testing.T) {
 }
 
 func TestWorklogStartIsNoonUTC(t *testing.T) {
-	plan := BuildDayPlan(testCfg, jun1, model.StatusFullLeave, nil, 0, nil)
+	plan := BuildDayPlan(testCfg, jun1, model.StatusFullLeave, nil, nil, nil)
 	if len(plan.Suggested) == 0 {
 		t.Fatal("no suggested worklogs")
 	}
@@ -186,7 +200,7 @@ func TestWorklogStartIsNoonUTC(t *testing.T) {
 
 func TestClonePreviousDay(t *testing.T) {
 	acts := []model.Activity{activity("EDB-100 work", "EDB-100")}
-	src := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, 60, acts)
+	src := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, makeMeetings(60), acts)
 
 	jun2 := time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)
 	dest := model.DayPlan{Date: jun2, Status: model.StatusWorking}
@@ -201,3 +215,4 @@ func TestClonePreviousDay(t *testing.T) {
 		}
 	}
 }
+

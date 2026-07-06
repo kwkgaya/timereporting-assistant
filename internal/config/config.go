@@ -79,6 +79,11 @@ type Config struct {
 	WebPort         int          `json:"webPort"`
 	Target          string       `json:"target"`
 
+	// LogMeetingsSeparately creates one worklog per calendar meeting (using
+	// the meeting title as the comment) instead of a single aggregate worklog.
+	// Defaults to true.
+	LogMeetingsSeparately bool `json:"logMeetingsSeparately"`
+
 	// AutoUpdate enables checking GitHub Releases on startup and installing
 	// newer versions automatically. Defaults to true (see Default()).
 	AutoUpdate bool `json:"autoUpdate"`
@@ -104,6 +109,7 @@ func Default() Config {
 		Target:           TargetJira,
 		AutoUpdate:       true,
 		UpdatePrerelease: false,
+		LogMeetingsSeparately: true,
 	}
 }
 

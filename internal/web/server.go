@@ -222,6 +222,7 @@ type configView struct {
 	// without resetting them to false.
 	AutoUpdate       *bool `json:"autoUpdate,omitempty"`
 	UpdatePrerelease *bool `json:"updatePrerelease,omitempty"`
+	LogMeetingsSeparately *bool `json:"logMeetingsSeparately,omitempty"`
 }
 
 func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
@@ -241,8 +242,9 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 		MockJiraPort:     cfg.MockJiraPort,
 		WebPort:          cfg.WebPort,
 		Target:           cfg.Target,
-		AutoUpdate:       &cfg.AutoUpdate,
-		UpdatePrerelease: &cfg.UpdatePrerelease,
+		AutoUpdate:            &cfg.AutoUpdate,
+		UpdatePrerelease:      &cfg.UpdatePrerelease,
+		LogMeetingsSeparately: &cfg.LogMeetingsSeparately,
 	})
 }
 
@@ -298,6 +300,9 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if v.UpdatePrerelease != nil {
 		s.cfg.UpdatePrerelease = *v.UpdatePrerelease
+	}
+	if v.LogMeetingsSeparately != nil {
+		s.cfg.LogMeetingsSeparately = *v.LogMeetingsSeparately
 	}
 	cfg := s.cfg
 	cfgPath := s.cfgPath
@@ -1570,6 +1575,10 @@ a{color:#0052cc}
   </details>
   <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
     <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
+      <input type="checkbox" id="w-logMeetingsSeparately" checked style="width:16px;height:16px">
+      Log each calendar meeting separately (using its title as the comment)
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
       <input type="checkbox" id="w-autoUpdate" checked style="width:16px;height:16px">
       Keep the app up to date automatically
     </label>
@@ -1689,6 +1698,7 @@ async function saveReposAndFinish(){
       webPort:+(document.getElementById('w-webPort').value||9080),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
       updatePrerelease:document.getElementById('w-updatePrerelease').checked,
+      logMeetingsSeparately:document.getElementById('w-logMeetingsSeparately').checked,
     });
   }catch(e){ showBuildError(e.message); return; }
   startBuildStream();
@@ -1960,6 +1970,12 @@ button.secondary:hover{background:#f4f5f7}
   </div>
   <div class="field">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="logMeetingsSeparately" style="width:16px;height:16px">
+      Log each calendar meeting as a separate worklog (using the meeting title as comment)
+    </label>
+  </div>
+  <div class="field">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="autoUpdate" style="width:16px;height:16px">
       Keep the app up to date automatically
     </label>
@@ -2028,6 +2044,7 @@ async function loadConfig() {
     document.getElementById('gitAuthors').value = (c.gitAuthors||[]).join(', ');
     document.getElementById('workdayHours').value = c.workdayHours||7;
     document.getElementById('webPort').value = c.webPort||9080;
+    document.getElementById('logMeetingsSeparately').checked = c.logMeetingsSeparately!==false;
     document.getElementById('autoUpdate').checked = c.autoUpdate!==false;
     document.getElementById('updatePrerelease').checked = c.updatePrerelease===true;
   } catch(e) { toast('Could not load config: '+e.message, true); }
@@ -2058,6 +2075,7 @@ async function saveConfig() {
       gitAuthors: authors,
       workdayHours: +document.getElementById('workdayHours').value,
       webPort: +document.getElementById('webPort').value,
+      logMeetingsSeparately: document.getElementById('logMeetingsSeparately').checked,
       autoUpdate: document.getElementById('autoUpdate').checked,
       updatePrerelease: document.getElementById('updatePrerelease').checked,
     });
@@ -2482,16 +2500,20 @@ function renderDetail(day) {
     html += '</table>';
   }
 
-  // Summary and submit — only shown when the day still needs work.
+  // Summary line — shown when day is not already full from Jira.
   if (!dayFull) {
     html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
       +' &bull; Suggested: '+hm(suggMins)
       +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
-    if (!day.submitted) {
-      html += '<div class="controls" style="margin-bottom:16px">'
-        +'<button class="primary" onclick="submitDay(\''+day.date+'\')" >Approve &amp; submit</button>'
-        +'</div>';
-    }
+  }
+
+  // Submit actions — only when day still has unsubmitted rows that cover remaining time.
+  const allRowsSubmitted = (day.suggested||[]).filter(w=>w.minutes>0).length > 0
+    && (day.suggested||[]).filter(w=>w.minutes>0).every(w=>w.submitted);
+  if (!dayFull && !day.submitted && !allRowsSubmitted) {
+    html += '<div class="controls" style="margin-bottom:16px">'
+      +'<button class="primary" onclick="submitDay(\''+day.date+'\')" >Approve &amp; submit</button>'
+      +'</div>';
   }
 
   // Notes (below the suggested worklogs)
@@ -2558,11 +2580,15 @@ function editRow(date, idx, field, value) {
   saveSuggested(date, day.suggested);
 }
 
-// editRowKey updates the issue key and refreshes the displayed title.
+// editRowKey updates the issue key, clears the comment (so it doesn't carry
+// over from the previous key), and refreshes the displayed title.
 function editRowKey(date, idx, value) {
   const key = parseIssueKey(value);
   const day = getDayLocal(date);
   if (!day) return;
+  if (day.suggested[idx].issueKey !== key) {
+    day.suggested[idx].comment = ''; // clear stale comment when key changes
+  }
   day.suggested[idx].issueKey = key;
   saveSuggested(date, day.suggested);
   fetchIssueTitle(key, 'key-'+date+'-'+idx);
