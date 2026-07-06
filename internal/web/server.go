@@ -3097,6 +3097,12 @@ async function clonePrev(date) {
 async function submitRow(date, rowIdx) {
   showOverlay('Submitting…');
   try {
+    // Flush local state to the server first so the row index resolves to the
+    // correct worklog even if the server cache drifted from the UI.
+    const localDay = getDayLocal(date);
+    if (localDay && localDay.suggested) {
+      await api('PUT','/days/'+date,{suggested: localDay.suggested});
+    }
     const res = await api('POST','/days/'+date+'/rows/'+rowIdx+'/submit');
     const i = days.findIndex(d=>d.date===date);
     if (i>=0) days[i] = res.day;
@@ -3110,6 +3116,12 @@ async function submitRow(date, rowIdx) {
 async function submitDay(date) {
   showOverlay('Submitting all worklogs…');
   try {
+    // Flush local state to the server before submitting so the issue keys
+    // the server uses are exactly what the user sees in the UI.
+    const localDay = getDayLocal(date);
+    if (localDay && localDay.suggested) {
+      await api('PUT','/days/'+date,{suggested: localDay.suggested});
+    }
     const res = await api('POST','/days/'+date+'/submit',{dryRun:false});
     const n = (res.submitted||[]).length;
     toast('Submitted: '+n+' worklog(s) to '+res.target+'.');
