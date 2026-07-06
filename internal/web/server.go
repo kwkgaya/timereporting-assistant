@@ -1726,11 +1726,13 @@ a{color:#0052cc}
     <input type="number" id="w-webPort" value="9080" min="1024" max="65535">
   </div>
   </details>
-  <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
-    <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
+  <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px;border:1px solid #dfe1e6">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.88rem">
       <input type="checkbox" id="w-logMeetingsSeparately" checked style="width:16px;height:16px">
       Log each calendar meeting separately (using its title as the comment)
     </label>
+  </div>
+  <div style="margin-top:10px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
     <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
       <input type="checkbox" id="w-autoUpdate" checked style="width:16px;height:16px">
       Keep the app up to date automatically
@@ -2121,8 +2123,8 @@ button.secondary:hover{background:#f4f5f7}
       <input type="number" id="webPort" min="1024" max="65535">
     </div>
   </div>
-  <div class="field">
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+  <div style="margin:12px 0;padding:12px 14px;background:#f4f5f7;border-radius:6px;border:1px solid #dfe1e6">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.88rem">
       <input type="checkbox" id="logMeetingsSeparately" style="width:16px;height:16px">
       Log each calendar meeting as a separate worklog (using the meeting title as comment)
     </label>
