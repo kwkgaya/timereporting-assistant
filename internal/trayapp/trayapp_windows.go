@@ -19,6 +19,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"fyne.io/systray"
 	"golang.org/x/sys/windows/registry"
@@ -85,11 +86,13 @@ func onReady(version, cfgPath string) {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit Timereporting Assistant tray")
 
-	// Once-per-day reminder.
-	go func() {
-		time.Sleep(3 * time.Second) // let the system settle after login
-		checkAndRemind(cfg, s, today)
-	}()
+	// Show the reminder on the first time the user interacts with the computer
+	// each day (i.e. returns from lock screen, sleep, or any idle ≥ 5 min).
+	// Do NOT show it immediately on startup/login — that's distracting.
+	go watchForFirstInteraction(func() {
+		today := time.Now().Format("2006-01-02")
+		checkAndRemind(cfg, loadState(), today)
+	})
 
 	// Auto-update check shortly after startup (if enabled and this is a
 	// released build).
@@ -137,9 +140,52 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 		return
 	}
 	msg := fmt.Sprintf("You have %d incomplete day(s). Click to review.", count)
-	showToast("⏰ Timereporting", msg, fmt.Sprintf("http://localhost:%d", cfg.WebPort))
+	showReminderToast("⏰ Time reporting reminder", msg, fmt.Sprintf("http://localhost:%d", cfg.WebPort))
 	s.LastRemindedDate = today
 	saveState(s)
+}
+
+// watchForFirstInteraction polls the system idle time. When the user has been
+// idle for ≥ idleThreshold (indicating a lock/sleep/walk-away) and then
+// returns, it fires onReturn once, then waits for the next idle→active cycle.
+// This fires on the user's first real interaction of the day after being away,
+// not on login.
+func watchForFirstInteraction(onReturn func()) {
+	const idleThreshold = 5 * time.Minute
+	const poll = 20 * time.Second
+
+	user32 := syscall.MustLoadDLL("user32.dll")
+	getLastInput := user32.MustFindProc("GetLastInputInfo")
+	kernel32 := syscall.MustLoadDLL("kernel32.dll")
+	getTickCount := kernel32.MustFindProc("GetTickCount")
+
+	type LASTINPUTINFO struct {
+		cbSize uint32
+		dwTime uint32
+	}
+
+	wasIdle := false
+	for {
+		time.Sleep(poll)
+		var lii LASTINPUTINFO
+		lii.cbSize = uint32(unsafe.Sizeof(lii))
+		getLastInput.Call(uintptr(unsafe.Pointer(&lii)))
+		tick, _, _ := getTickCount.Call()
+		idleMs := uint32(tick) - lii.dwTime
+		idleDur := time.Duration(idleMs) * time.Millisecond
+
+		if idleDur >= idleThreshold {
+			if !wasIdle {
+				log.Printf("user became idle (idle=%s)", idleDur.Round(time.Second))
+			}
+			wasIdle = true
+		} else if wasIdle {
+			// User just returned from idle — first interaction.
+			wasIdle = false
+			log.Printf("user returned from idle — firing reminder check")
+			go onReturn()
+		}
+	}
 }
 
 // countIncompleteDays asks the running web server how many days are under 7h.
@@ -302,10 +348,50 @@ func saveState(s state) {
 	_ = os.WriteFile(path, data, 0o600)
 }
 
-// ── Toast notification ────────────────────────────────────────────────────────
+// ── Toast notifications ──────────────────────────────────────────────────────
 
-// showToast shows a Windows toast notification using PowerShell.
-// Clicking the toast opens url in the default browser.
+// showReminderToast shows a prominent Windows toast for the daily reminder.
+// It uses scenario="reminder" (stays on screen longer, plays reminder sound)
+// with two action buttons: "Review now" and "Remind me later".
+func showReminderToast(title, message, url string) {
+	sanitise := func(s string) string {
+		s = strings.ReplaceAll(s, `"`, `'`)
+		s = strings.ReplaceAll(s, "`", "'")
+		return s
+	}
+	title = sanitise(title)
+	message = sanitise(message)
+	url = sanitise(url)
+
+	ps := fmt.Sprintf(`
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null
+$template = @"
+<toast scenario="reminder" duration="long" activationType="protocol" launch="%s">
+  <visual>
+    <binding template="ToastGeneric">
+      <text hint-style="title">%s</text>
+      <text hint-wrap="true">%s</text>
+    </binding>
+  </visual>
+  <actions>
+    <action content="Review now" activationType="protocol" arguments="%s"/>
+    <action content="Dismiss" activationType="system" arguments="dismiss"/>
+  </actions>
+</toast>
+"@
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml($template)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Timereporting Assistant").Show($toast)
+`, url, title, message, url)
+
+	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
+	_ = cmd.Start()
+}
+
+// showToast shows a simple Windows toast (used for non-reminder notifications).
 func showToast(title, message, url string) {
 	// Sanitise inputs for embedding in PowerShell string.
 	sanitise := func(s string) string {
