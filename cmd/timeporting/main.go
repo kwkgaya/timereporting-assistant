@@ -18,6 +18,7 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
 	"github.com/kwkgaya/timereporting-assistant/internal/engine"
+	"github.com/kwkgaya/timereporting-assistant/internal/holidays"
 	"github.com/kwkgaya/timereporting-assistant/internal/ics"
 	"github.com/kwkgaya/timereporting-assistant/internal/jira"
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
@@ -216,7 +217,7 @@ func runMain() {
 			ex := existing[dk]
 			mm := ics.TotalMinutesForDay(meetings, day)
 			status := model.StatusWorking
-			if ics.IsHolidayDay(meetings, day) {
+			if ics.IsHolidayDay(meetings, day) || holidays.IsHoliday(c.Country, day) {
 				status = model.StatusHoliday
 			}
 			var acts []model.Activity
@@ -330,7 +331,7 @@ func runMain() {
 		ex := existing[dk]
 		mm := ics.TotalMinutesForDay(meetings, day)
 		dayStatus := model.StatusWorking
-		if ics.IsHolidayDay(meetings, day) {
+		if ics.IsHolidayDay(meetings, day) || holidays.IsHoliday(c.Country, day) {
 			dayStatus = model.StatusHoliday
 		}
 		var acts []model.Activity

@@ -222,6 +222,8 @@ type configView struct {
 	// without resetting them to false.
 	AutoUpdate       *bool `json:"autoUpdate,omitempty"`
 	UpdatePrerelease *bool `json:"updatePrerelease,omitempty"`
+	// Country is the ISO 3166-1 alpha-2 code for built-in public holiday detection.
+	Country string `json:"country,omitempty"`
 }
 
 func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
@@ -243,6 +245,7 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 		Target:           cfg.Target,
 		AutoUpdate:       &cfg.AutoUpdate,
 		UpdatePrerelease: &cfg.UpdatePrerelease,
+		Country:          cfg.Country,
 	})
 }
 
@@ -299,6 +302,12 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	if v.UpdatePrerelease != nil {
 		s.cfg.UpdatePrerelease = *v.UpdatePrerelease
 	}
+	// Country may be empty (disable built-in holidays) so we always apply it
+	// when the field is present in the JSON. Because Country is a plain string
+	// (not a pointer), omitempty means it won't be sent for partial wizard
+	// saves that omit it — apiPutConfig already guards with "if non-empty".
+	// But country CAN be intentionally cleared, so we always write it.
+	s.cfg.Country = v.Country
 	cfg := s.cfg
 	cfgPath := s.cfgPath
 	s.mu.Unlock()
@@ -1562,6 +1571,14 @@ a{color:#0052cc}
     </label>
   </div>
   <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged first before other tasks.</div>
+  <label>Your country <span style="font-size:.78rem;font-weight:400;color:#6b778c">(public holidays auto-detected)</span></label>
+  <select id="w-country" style="width:100%;padding:8px 10px;border:1px solid #dfe1e6;border-radius:4px;font:inherit;margin-bottom:14px">
+    <option value="">-- None / use ICS calendar only --</option>
+    <option value="NO">🇳🇴 Norway</option>
+    <option value="LK">🇱🇰 Sri Lanka</option>
+    <option value="SE">🇸🇪 Sweden</option>
+  </select>
+  <div class="hint" style="margin-top:-10px">When a country is selected, official public holidays are automatically set as holidays in your time report — no ICS entry needed.</div>
   <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change ports (default 9080 / 9099)</summary>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
     <div>
@@ -1692,6 +1709,7 @@ async function saveReposAndFinish(){
     await api('PUT','/config',{
       localRepos:repos, gitAuthors:authors, icsPath:ics,
       workdayHours:7, target:'mock-write',
+      country:document.getElementById('w-country').value,
       webPort:+(document.getElementById('w-webPort').value||9080),
       mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
@@ -1770,6 +1788,7 @@ async function prefill(){
     if(c.mockJiraPort)document.getElementById('w-mockPort').value=c.mockJiraPort;
     if(typeof c.autoUpdate==='boolean')document.getElementById('w-autoUpdate').checked=c.autoUpdate;
     if(typeof c.updatePrerelease==='boolean')document.getElementById('w-updatePrerelease').checked=c.updatePrerelease;
+    document.getElementById('w-country').value=c.country||'';
   }catch(e){/* first run: nothing to pre-fill */}
   // Detect already-saved tokens so the user can reuse them without re-pasting.
   try{
@@ -1951,6 +1970,16 @@ button.secondary:hover{background:#f4f5f7}
     </div>
     <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged to the meeting task key above.</div>
   </div>
+  <div class="field">
+    <label>Country <span class="hint" style="display:inline">(public holidays auto-detected)</span></label>
+    <select id="country" style="width:100%;padding:7px 10px;border:1px solid #dfe1e6;border-radius:4px;font:inherit">
+      <option value="">-- None / use ICS calendar only --</option>
+      <option value="NO">🇳🇴 Norway</option>
+      <option value="LK">🇱🇰 Sri Lanka</option>
+      <option value="SE">🇸🇪 Sweden</option>
+    </select>
+    <div class="hint">When set, official public holidays are automatically marked as holidays without needing an ICS entry.</div>
+  </div>
 </section>
 
 <!-- Workday + ports -->
@@ -2060,6 +2089,7 @@ async function loadConfig() {
     document.getElementById('target').value = c.target||'mock';
     document.getElementById('autoUpdate').checked = c.autoUpdate!==false;
     document.getElementById('updatePrerelease').checked = c.updatePrerelease===true;
+    document.getElementById('country').value = c.country||'';
   } catch(e) { toast('Could not load config: '+e.message, true); }
 }
 
@@ -2092,6 +2122,7 @@ async function saveConfig() {
       target: document.getElementById('target').value,
       autoUpdate: document.getElementById('autoUpdate').checked,
       updatePrerelease: document.getElementById('updatePrerelease').checked,
+      country: document.getElementById('country').value,
     });
     document.getElementById('cfg-msg').textContent = '✅ Saved';
     document.getElementById('cfg-msg').style.color = '#00875a';

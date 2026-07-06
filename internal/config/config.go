@@ -86,6 +86,11 @@ type Config struct {
 	// Defaults to false.
 	UpdatePrerelease bool `json:"updatePrerelease"`
 
+	// Country is the ISO 3166-1 alpha-2 code used for built-in public holiday
+	// detection. Supported: "NO" (Norway), "SE" (Sweden), "LK" (Sri Lanka).
+	// Empty means rely on ICS calendar only.
+	Country string `json:"country"`
+
 	// Secrets, populated from the environment (never from JSON).
 	JiraAPIToken string `json:"-"`
 	GitHubToken  string `json:"-"`
