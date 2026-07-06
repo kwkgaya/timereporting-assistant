@@ -197,10 +197,7 @@ func runMain() {
 		}
 
 		var meetings []model.Meeting
-		if c.ICSPath != "" {
-			report(0, total, "Reading calendar…")
-			meetings, _ = ics.ParseFile(c.ICSPath)
-		}
+		meetings, _ = loadMeetings(c)
 
 		gc := activity.NewGitCollector(c.LocalRepos, c.GitAuthors)
 		var ghc *activity.GitHubCollector
@@ -343,9 +340,7 @@ func runMain() {
 		}
 
 		var meetings []model.Meeting
-		if c.ICSPath != "" {
-			meetings, _ = ics.ParseFile(c.ICSPath)
-		}
+		meetings, _ = loadMeetings(c)
 		dayMeetings := ics.MeetingsForDay(meetings, day)
 		dayStatus := model.StatusWorking
 		if ics.IsHolidayDay(meetings, day) {
@@ -516,8 +511,18 @@ func appDataDir() string {
 	return "."
 }
 
-// jiraAssignedActivities converts Jira issues into synthetic Activity values
-// so the engine can distribute time across them when no code activity is found.
+// loadMeetings loads the ICS calendar, preferring the published URL over a local file.
+func loadMeetings(c config.Config) ([]model.Meeting, error) {
+	if c.ICSUrl != "" {
+		return ics.ParseURL(c.ICSUrl)
+	}
+	if c.ICSPath != "" {
+		return ics.ParseFile(c.ICSPath)
+	}
+	return nil, nil
+}
+
+// jiraAssignedActivities converts Jira issues into synthetic Activity values// so the engine can distribute time across them when no code activity is found.
 func jiraAssignedActivities(day time.Time, issues []jira.Issue) []model.Activity {
 	acts := make([]model.Activity, 0, len(issues))
 	for _, iss := range issues {

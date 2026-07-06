@@ -75,6 +75,9 @@ type Config struct {
 	LocalRepos      []string     `json:"localRepos"`
 	GitAuthors      []string     `json:"gitAuthors"`
 	ICSPath         string       `json:"icsPath"`
+	// ICSUrl is a published Outlook calendar URL (ICS format). When set, the
+	// app fetches the live calendar from this URL instead of reading ICSPath.
+	ICSUrl          string       `json:"icsUrl"`
 	MockJiraPort    int          `json:"mockJiraPort"`
 	WebPort         int          `json:"webPort"`
 	Target          string       `json:"target"`

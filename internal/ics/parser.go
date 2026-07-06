@@ -6,7 +6,9 @@ package ics
 
 import (
 	"bufio"
+	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -16,6 +18,9 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
 
+// httpClient is used for fetching published calendar URLs.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 // ParseFile opens an .ics file and returns the meetings it contains.
 func ParseFile(path string) ([]model.Meeting, error) {
 	f, err := os.Open(path)
@@ -24,6 +29,20 @@ func ParseFile(path string) ([]model.Meeting, error) {
 	}
 	defer f.Close()
 	return Parse(f)
+}
+
+// ParseURL fetches an ICS document from url and returns the meetings it contains.
+// A 30-second timeout is applied to the HTTP request.
+func ParseURL(url string) ([]model.Meeting, error) {
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch calendar URL: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("calendar URL returned %d", resp.StatusCode)
+	}
+	return Parse(resp.Body)
 }
 
 // Parse reads iCalendar data from r and returns meeting events.

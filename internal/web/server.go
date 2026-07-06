@@ -195,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/ics", s.apiUploadICS)
 	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
+	mux.HandleFunc("GET /guide/calendar-url", s.handleCalendarGuide)
 	mux.HandleFunc("GET /wizard", s.handleWizard)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -215,6 +216,7 @@ type configView struct {
 	GitAuthors     []string `json:"gitAuthors"`
 	GitHubUsername string   `json:"githubUsername"`
 	ICSPath        string   `json:"icsPath"`
+	ICSUrl         string   `json:"icsUrl,omitempty"`
 	MockJiraPort   int      `json:"mockJiraPort"`
 	WebPort        int      `json:"webPort"`
 	Target         string   `json:"target"`
@@ -286,6 +288,7 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	if v.ICSPath != "" {
 		s.cfg.ICSPath = v.ICSPath
 	}
+	s.cfg.ICSUrl = v.ICSUrl // may be empty (to clear it)
 	if v.MockJiraPort > 0 {
 		s.cfg.MockJiraPort = v.MockJiraPort
 	}
@@ -687,8 +690,7 @@ func (s *Server) handleWizard(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleJiraGuide serves the Jira API token creation guide.
-func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(buildJiraGuideHTML()))
 }
 
@@ -696,6 +698,11 @@ func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleGitHubGuide(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(githubGuideHTML))
+}
+
+func (s *Server) handleCalendarGuide(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(buildCalendarGuideHTML()))
 }
 
 // handleSettings serves the settings/onboarding page.
@@ -1712,7 +1719,11 @@ a{color:#0052cc}
   <label>Your git author email(s)</label>
   <input type="text" id="w-authors" placeholder="you@example.com">
   <div class="hint">Filters commits by author. Comma-separated if you have more than one email.</div>
-  <label>Outlook calendar .ics export — optional</label>
+  <label>Outlook calendar — published URL <span style="font-size:.78rem;font-weight:400;color:#0052cc">(recommended)</span></label>
+  <p style="margin:0 0 8px"><a href="/guide/calendar-url" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to get the published calendar URL →</a></p>
+  <input type="text" id="w-icsUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics">
+  <div class="hint">The app will always fetch your live calendar from this URL — no need to re-export.</div>
+  <label>Or use a local .ics export file</label>
   <div class="input-row" style="margin-bottom:4px">
     <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics" style="margin-bottom:0">
     <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:38px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
@@ -1840,6 +1851,7 @@ async function saveReposAndFinish(){
   if(!repos.length){showErr('err-5','Enter at least one repository path.');return;}
   const authors=document.getElementById('w-authors').value.split(',').map(s=>s.trim()).filter(Boolean);
   const ics=document.getElementById('w-ics').value.trim();
+  const icsUrl=document.getElementById('w-icsUrl').value.trim();
   goTo(6);
   document.getElementById('build-view').style.display='block';
   document.getElementById('done-view').style.display='none';
@@ -1848,7 +1860,7 @@ async function saveReposAndFinish(){
   document.getElementById('build-count').textContent='';
   try{
     await api('PUT','/config',{
-      localRepos:repos, gitAuthors:authors, icsPath:ics,
+      localRepos:repos, gitAuthors:authors, icsPath:ics, icsUrl:icsUrl,
       workdayHours:7, target:'real',
       webPort:+(document.getElementById('w-webPort').value||9080),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
@@ -1924,6 +1936,7 @@ async function prefill(){
     if(c.localRepos&&c.localRepos.length)document.getElementById('w-repos').value=c.localRepos.join('\n');
     if(c.gitAuthors&&c.gitAuthors.length)document.getElementById('w-authors').value=c.gitAuthors.join(', ');
     set('w-ics',c.icsPath);
+    set('w-icsUrl',c.icsUrl);
     if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
     if(typeof c.autoUpdate==='boolean')document.getElementById('w-autoUpdate').checked=c.autoUpdate;
   }catch(e){/* first run: nothing to pre-fill */}
@@ -1946,6 +1959,90 @@ prefill();
 goTo(1);
 </script>
 </body></html>`
+
+// buildCalendarGuideHTML returns the guide for getting an Outlook published calendar ICS URL.
+func buildCalendarGuideHTML() string {
+	img := func(b64, mime, alt string) string {
+		return `<img src="data:` + mime + `;base64,` + b64 + `" alt="` + alt + `" class="guide-img">`
+	}
+	return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Get Outlook calendar URL — Timereporting Assistant</title>
+<style>` + guideCSS + `</style></head>
+<body>
+<header>
+  <h1>How to get your Outlook published calendar URL</h1>
+  <a href="/settings">← Back to Settings</a>
+</header>
+<main>
+<section>
+  <h2>Why use a URL instead of a file?</h2>
+  <p class="subtitle">
+    A published calendar URL means the app always reads your <strong>live calendar</strong>
+    without you needing to re-export and re-upload an .ics file.
+    Once configured, new meetings appear automatically the next time a day plan is built.
+  </p>
+  <p style="font-size:.85rem;color:#42526e">The URL is read-only — publishing only shares your calendar events; nobody can edit them.</p>
+</section>
+
+<section>
+  <h2>Step-by-step</h2>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <strong>Open Outlook Settings</strong>
+      <p>In Outlook, go to <strong>File → Settings</strong> (or the gear icon in Outlook on the web).</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <strong>Open Shared Calendars</strong>
+      <p>Select <strong>Calendar → Shared calendars</strong>. Under <strong>"Publish a calendar"</strong>,
+      pick your calendar and set the permission to <strong>"Can view all details"</strong>. Click <strong>Publish</strong>.</p>
+      ` + img(calStep2B64, "image/jpeg", "Step 2 — Publish a calendar") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <strong>Include all event details</strong>
+      <p>Make sure you select <strong>"Can view all details"</strong> — this ensures meeting titles are exported so the app can create separate worklogs for each meeting.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <strong>Copy the ICS link</strong>
+      <p>After clicking Publish you will see two links. Click on the <strong>ICS</strong> link to open it,
+      then copy the full URL from your browser's address bar.</p>
+      ` + img(calStep5B64, "image/png", "Step 4 — Copy the ICS link") + `
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <strong>Paste the URL in Settings</strong>
+      <p>Return to <a href="/settings">Settings</a>, paste the URL into the
+      <strong>Calendar URL</strong> field, and click <strong>Save &amp; rebuild plans</strong>.
+      The app will fetch your live calendar automatically from now on.</p>
+    </div>
+  </div>
+</section>
+</main>
+<div id="lightbox" onclick="closeLightbox()">
+  <span id="lightbox-close" onclick="closeLightbox()">✕</span>
+  <img id="lightbox-img" src="" alt="">
+</div>
+<script>` + guideJS + `</script>
+</body></html>`
+}
 
 // buildSettingsHTML returns the settings/onboarding HTML with screenshots inlined.
 func buildSettingsHTML() string {
@@ -2098,7 +2195,14 @@ button.secondary:hover{background:#f4f5f7}
     <input type="text" id="gitAuthors" placeholder="you@example.com, you@work.com">
   </div>
   <div class="field">
-    <label>Calendar export (.ics file path)</label>
+    <label>Calendar — published URL <span style="font-size:.78rem;font-weight:400;color:#0052cc">(recommended)</span>
+      <a href="/guide/calendar-url" target="_blank" style="font-size:.78rem;margin-left:8px">📖 How to get the URL →</a>
+    </label>
+    <input type="text" id="icsUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics">
+    <div class="hint" style="margin-top:4px">Paste the published ICS link from Outlook. The app fetches your live calendar automatically — no need to re-export.</div>
+  </div>
+  <div class="field">
+    <label>Calendar export (.ics file path) <span style="font-size:.78rem;font-weight:400;color:#6b778c">— or use the URL above</span></label>
     <div style="display:flex;gap:8px;align-items:center">
       <input type="text" id="icsPath" placeholder="C:\Users\you\Downloads\calendar.ics" style="flex:1;margin-bottom:0">
       <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:36px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
@@ -2195,6 +2299,7 @@ async function loadConfig() {
     document.getElementById('leaveKey').value = c.leaveKey||'';
     document.getElementById('githubUsername').value = c.githubUsername||'';
     document.getElementById('icsPath').value = c.icsPath||'';
+    document.getElementById('icsUrl').value = c.icsUrl||'';
     document.getElementById('localRepos').value = (c.localRepos||[]).join('\n');
     document.getElementById('gitAuthors').value = (c.gitAuthors||[]).join(', ');
     document.getElementById('workdayHours').value = c.workdayHours||7;
@@ -2226,6 +2331,7 @@ async function saveConfig() {
       leaveKey: document.getElementById('leaveKey').value.trim(),
       githubUsername: document.getElementById('githubUsername').value.trim(),
       icsPath: document.getElementById('icsPath').value.trim(),
+      icsUrl: document.getElementById('icsUrl').value.trim(),
       localRepos: repos,
       gitAuthors: authors,
       workdayHours: +document.getElementById('workdayHours').value,
