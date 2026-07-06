@@ -16,8 +16,8 @@ func TestLoadDefaultsWhenNoPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(\"\") error: %v", err)
 	}
-	if cfg.Target != TargetMock {
-		t.Errorf("default target = %q, want %q", cfg.Target, TargetMock)
+	if cfg.Target != TargetMockWrite {
+		t.Errorf("default target = %q, want %q", cfg.Target, TargetMockWrite)
 	}
 	if cfg.MeetingIssueKey != "EDB-9071" {
 		t.Errorf("meeting key = %q, want EDB-9071", cfg.MeetingIssueKey)
@@ -128,7 +128,7 @@ func TestLoadSelfHealsBlankRequiredFields(t *testing.T) {
 	if cfg.WebPort != 9080 || cfg.MockJiraPort != 9099 {
 		t.Errorf("ports not healed: web=%d mock=%d", cfg.WebPort, cfg.MockJiraPort)
 	}
-	if cfg.Target != TargetMock {
+	if cfg.Target != TargetMockWrite {
 		t.Errorf("target not healed: %q", cfg.Target)
 	}
 	// Real values from the file must be preserved.

@@ -199,9 +199,27 @@ func runMain() {
 		}
 
 		report(0, total, "Reading existing worklogs…")
-		existing, _ := rc.ExistingWorklogsByDay(c.Jira.Email, startDate, endDate)
-		if existing == nil {
-			existing = map[string][]model.Worklog{}
+		// Fetch from the real-Jira read client and tag source.
+		existing := map[string][]model.Worklog{}
+		if rc != mb {
+			// Real Jira read
+			if ex, err := rc.ExistingWorklogsByDay(c.Jira.Email, startDate, endDate); err == nil {
+				for dk, wls := range ex {
+					for i := range wls {
+						wls[i].Source = "real"
+					}
+					existing[dk] = append(existing[dk], wls...)
+				}
+			}
+		}
+		// Always also read from mock so submitted-to-mock worklogs are visible.
+		if ex, err := mb.ExistingWorklogsByDay("", startDate, endDate); err == nil {
+			for dk, wls := range ex {
+				for i := range wls {
+					wls[i].Source = "mock"
+				}
+				existing[dk] = append(existing[dk], wls...)
+			}
 		}
 
 		var meetings []model.Meeting
@@ -253,9 +271,24 @@ func runMain() {
 		if rc == nil {
 			rc = mb
 		}
-		existing, _ := rc.ExistingWorklogsByDay(c.Jira.Email, day, day)
-		if existing == nil {
-			existing = map[string][]model.Worklog{}
+		existing := map[string][]model.Worklog{}
+		if rc != mb {
+			if ex, err := rc.ExistingWorklogsByDay(c.Jira.Email, day, day); err == nil {
+				for dk, wls := range ex {
+					for i := range wls {
+						wls[i].Source = "real"
+					}
+					existing[dk] = append(existing[dk], wls...)
+				}
+			}
+		}
+		if ex, err := mb.ExistingWorklogsByDay("", day, day); err == nil {
+			for dk, wls := range ex {
+				for i := range wls {
+					wls[i].Source = "mock"
+				}
+				existing[dk] = append(existing[dk], wls...)
+			}
 		}
 		var meetings []model.Meeting
 		if c.ICSPath != "" {

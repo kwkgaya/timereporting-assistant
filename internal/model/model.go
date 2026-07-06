@@ -71,6 +71,9 @@ type Worklog struct {
 	Category WorklogCategory // origin
 	Started  time.Time       // day at 12:00:00 UTC
 	Author   string          // email of the author (set for existing worklogs read from Jira)
+	// Source identifies where an existing worklog was read from: "real" (real
+	// Jira), "mock" (mock Jira server), or "" for suggested/manual worklogs.
+	Source string
 }
 
 // DayPlan is the full proposed timesheet for a single day.
@@ -125,7 +128,8 @@ func IsWeekday(t time.Time) bool {
 }
 
 // Weekdays returns the list of Mon-Fri days in [start, end] inclusive (UTC).
-func Weekdays(start, end time.Time) []time.Time {	var days []time.Time
+func Weekdays(start, end time.Time) []time.Time {
+	var days []time.Time
 	for d := Day(start); !d.After(Day(end)); d = d.AddDate(0, 0, 1) {
 		switch d.Weekday() {
 		case time.Saturday, time.Sunday:

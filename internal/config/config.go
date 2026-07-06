@@ -101,7 +101,7 @@ func Default() Config {
 		GitHub:           GitHubConfig{APIBaseURL: "https://api.github.com"},
 		MockJiraPort:     9099,
 		WebPort:          9080,
-		Target:           TargetMock,
+		Target:           TargetMockWrite,
 		AutoUpdate:       true,
 		UpdatePrerelease: false,
 	}
@@ -166,7 +166,7 @@ func Load(path string) (Config, error) {
 		cfg.GitHub.APIBaseURL = def.GitHub.APIBaseURL
 	}
 	if cfg.Target == "" {
-		cfg.Target = TargetMock
+		cfg.Target = TargetMockWrite
 	}
 	return cfg, nil
 }

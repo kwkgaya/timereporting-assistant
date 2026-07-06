@@ -49,6 +49,9 @@ type WlogView struct {
 	Category  string `json:"category"`
 	Author    string `json:"author,omitempty"`
 	Submitted bool   `json:"submitted,omitempty"` // true once individually submitted
+	// Source is "real" (read from real Jira), "mock" (read/submitted to mock),
+	// or "" for suggested/manual worklogs not yet submitted.
+	Source string `json:"source,omitempty"`
 }
 
 // PlanBuilder is a function that builds a fresh set of day plans from the
@@ -985,10 +988,18 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 			continue // idempotent: don't re-submit the same worklog
 		}
 		if !body.DryRun {
-			if _, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
+			if id, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
 				writeErr(w, http.StatusInternalServerError,
 					fmt.Sprintf("submit %s: %v", wl.IssueKey, err))
 				return
+			} else {
+				wl.ID = id.ID
+				wl.Source = writeLabel // "Mock Jira" or "Real Jira"
+				if s.activeWrite == "mock" {
+					wl.Source = "mock"
+				} else {
+					wl.Source = "real"
+				}
 			}
 			alreadyLogged[fingerprint] = true
 		}
@@ -1115,6 +1126,7 @@ func planToView(p model.DayPlan) DayView {
 				Comment:  w.Comment,
 				Category: string(w.Category),
 				Author:   w.Author,
+				Source:   w.Source,
 			})
 		}
 		return out
@@ -1652,7 +1664,7 @@ async function saveReposAndFinish(){
   try{
     await api('PUT','/config',{
       localRepos:repos, gitAuthors:authors, icsPath:ics,
-      workdayHours:7, target:'mock',
+      workdayHours:7, target:'mock-write',
       webPort:+(document.getElementById('w-webPort').value||9080),
       mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
@@ -2176,6 +2188,10 @@ th{background:#f4f5f7;font-size:.8rem;font-weight:600}
 td input[type=number]{width:60px;border:1px solid #dfe1e6;border-radius:3px;padding:3px 5px;font:inherit}
 td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;padding:3px 5px;font:inherit}
 .cat-existing{background:#e3fcef}
+.cat-existing.src-real{background:#e3fcef;border-left:3px solid #00875a}
+.cat-existing.src-mock{background:#fff8e1;border-left:3px solid #ff991f}
+.src-real-badge{font-size:.68rem;font-weight:600;color:#00875a;background:#dcfae8;padding:1px 6px;border-radius:10px;margin-left:6px}
+.src-mock-badge{font-size:.68rem;font-weight:600;color:#974f00;background:#fff3cd;padding:1px 6px;border-radius:10px;margin-left:6px}
 .cat-meeting{background:#e9f2ff}
 .cat-activity{background:#fff}
 .cat-leave{background:#fff8b5}
@@ -2371,10 +2387,16 @@ function renderDetail(day) {
 
   // Existing worklogs (read-only)
   if (day.existing && day.existing.length) {
-    html += '<strong>Already logged in Jira</strong>';
+    const hasReal = day.existing.some(w=>w.source==='real');
+    const hasMock = day.existing.some(w=>w.source==='mock');
+    let legend = '';
+    if (hasReal) legend += '<span class="src-real-badge">✓ Real Jira</span>';
+    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock Jira</span>';
+    html += '<strong>Already logged in Jira</strong>'+legend;
     html += '<table><tr><th>Issue</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
-      html += '<tr class="cat-existing">'
+      const srcCls = w.source==='real'?'src-real':w.source==='mock'?'src-mock':'';
+      html += '<tr class="cat-existing'+( srcCls?' '+srcCls:'')+'">'
         +'<td>'+w.issueKey+'</td>'
         +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" style="width:60px" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',+this.value,\''+esc(w.comment)+'\')" title="Edit minutes"></td>'
         +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
