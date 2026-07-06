@@ -1135,17 +1135,79 @@ func (s *Server) apiClonePrevious(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 	s.mu.Lock()
 	idx, ok := s.dayIndex[date]
+	builder := s.dayBuilder
+	cfg := s.cfg
 	s.mu.Unlock()
 	if !ok {
 		writeErr(w, http.StatusNotFound, "date not found: "+date)
 		return
 	}
-	if idx == 0 {
-		writeErr(w, http.StatusBadRequest, "no previous day available")
+
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid date: "+date)
 		return
 	}
+
+	// Find the most recent previous weekday that is not a full leave or holiday.
+	// Iterate up to 7 days back to skip weekends and leave days.
+	var prev *DayView
+	var prevDate string
+	for d := t.AddDate(0, 0, -1); d.After(t.AddDate(0, 0, -10)); d = d.AddDate(0, 0, -1) {
+		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+			continue
+		}
+		pk := d.Format("2006-01-02")
+		s.mu.Lock()
+		pidx, pok := s.dayIndex[pk]
+		isPending := s.pendingDays[pk]
+		var pday DayView
+		if pok {
+			pday = s.days[pidx]
+		}
+		s.mu.Unlock()
+
+		if pday.Status == string(model.StatusFullLeave) || pday.Status == string(model.StatusHoliday) {
+			continue
+		}
+
+		// If the day is a stub (no suggestions built yet) and we have a builder, build it now.
+		if pok && isPending && builder != nil {
+			plan, berr := builder(cfg, d)
+			if berr == nil {
+				pday = planToView(plan)
+				s.mu.Lock()
+				s.days[pidx] = pday
+				delete(s.pendingDays, pk)
+				s.mu.Unlock()
+			}
+		} else if !pok && builder != nil {
+			// Out-of-range previous day — build on demand.
+			plan, berr := builder(cfg, d)
+			if berr == nil {
+				pday = planToView(plan)
+				s.mu.Lock()
+				s.dayIndex[pk] = len(s.days)
+				s.days = append(s.days, pday)
+				s.mu.Unlock()
+			}
+		}
+
+		if pday.Status == string(model.StatusFullLeave) || pday.Status == string(model.StatusHoliday) {
+			continue
+		}
+		prev = &pday
+		prevDate = pk
+		break
+	}
+
+	if prev == nil {
+		writeErr(w, http.StatusBadRequest, "no suitable previous day found")
+		return
+	}
+	_ = prevDate
+
 	s.mu.Lock()
-	prev := s.days[idx-1]
 	s.days[idx].Suggested = prev.Suggested
 	updated := s.days[idx]
 	s.mu.Unlock()
