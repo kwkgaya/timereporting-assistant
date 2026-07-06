@@ -25,6 +25,7 @@ import (
 
 	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
+	"github.com/kwkgaya/timereporting-assistant/internal/updater"
 )
 
 //go:embed assets/icon.ico
@@ -76,6 +77,7 @@ func onReady(version, cfgPath string) {
 	mOpenReport := systray.AddMenuItem("Open time report", "Open the review UI in your browser")
 	mOpenMock := systray.AddMenuItem("Mock Jira inspect", "Open the mock Jira inspect page")
 	mOpenLogs := systray.AddMenuItem("Open logs folder", "Open the folder containing the log file")
+	mUpdate := systray.AddMenuItem("Check for updates now", "Check GitHub for a newer version")
 	systray.AddSeparator()
 	mAutoStart := systray.AddMenuItemCheckbox("Start at login", "Toggle auto-start at Windows login", isAutoStartRegistered())
 	mVersion := systray.AddMenuItem("Version: "+version, "")
@@ -87,6 +89,13 @@ func onReady(version, cfgPath string) {
 	go func() {
 		time.Sleep(3 * time.Second) // let the system settle after login
 		checkAndRemind(cfg, s, today)
+	}()
+
+	// Auto-update check shortly after startup (if enabled and this is a
+	// released build).
+	go func() {
+		time.Sleep(5 * time.Second)
+		maybeAutoUpdate(cfg, version)
 	}()
 
 	webURL := fmt.Sprintf("http://localhost:%d", cfg.WebPort)
@@ -101,6 +110,8 @@ func onReady(version, cfgPath string) {
 			openBrowser(mockURL)
 		case <-mOpenLogs.ClickedCh:
 			openLogsFolder()
+		case <-mUpdate.ClickedCh:
+			go checkForUpdates(cfg, version, true)
 		case <-mAutoStart.ClickedCh:
 			if mAutoStart.Checked() {
 				_ = UnregisterAutoStart()
@@ -349,4 +360,66 @@ func openLogsFolder() {
 	cmd := exec.Command("explorer", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
+}
+
+// maybeAutoUpdate runs an update check on startup when auto-update is enabled
+// and this is a released (v-prefixed) build.
+func maybeAutoUpdate(cfg config.Config, version string) {
+	if !cfg.AutoUpdate {
+		log.Printf("auto-update disabled")
+		return
+	}
+	if !strings.HasPrefix(version, "v") {
+		log.Printf("auto-update skipped for non-release build %q", version)
+		return
+	}
+	checkForUpdates(cfg, version, false)
+}
+
+// checkForUpdates queries GitHub for a newer release and, if found, downloads
+// and launches the installer silently. When manual is true, the outcome is
+// surfaced via toast notifications.
+func checkForUpdates(cfg config.Config, version string, manual bool) {
+	chk := updater.New()
+	rel, err := chk.Latest(version, cfg.UpdatePrerelease)
+	if err != nil {
+		log.Printf("update check failed: %v", err)
+		if manual {
+			showToast("Update check failed", err.Error(), "")
+		}
+		return
+	}
+	if rel == nil {
+		log.Printf("no update available (current %s)", version)
+		if manual {
+			showToast("Timereporting", "You're on the latest version ("+version+").", "")
+		}
+		return
+	}
+	log.Printf("update available: %s (current %s)", rel.TagName, version)
+	if manual {
+		showToast("Updating Timereporting", "Downloading "+rel.TagName+"…", "")
+	}
+	dir := filepath.Join(os.TempDir(), "timereporting-update")
+	path, err := chk.Download(rel, dir)
+	if err != nil {
+		log.Printf("update download failed: %v", err)
+		if manual {
+			showToast("Update failed", err.Error(), "")
+		}
+		return
+	}
+	log.Printf("launching installer %s", path)
+	cmd := exec.Command(path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	if err := cmd.Start(); err != nil {
+		log.Printf("run installer failed: %v", err)
+		if manual {
+			showToast("Update failed", err.Error(), "")
+		}
+		return
+	}
+	// The installer closes this tray (InitializeSetup) and relaunches it after
+	// the files are replaced. Quit so we release our own binary's file lock.
+	systray.Quit()
 }

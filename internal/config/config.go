@@ -79,6 +79,13 @@ type Config struct {
 	WebPort         int          `json:"webPort"`
 	Target          string       `json:"target"`
 
+	// AutoUpdate enables checking GitHub Releases on startup and installing
+	// newer versions automatically. Defaults to true (see Default()).
+	AutoUpdate bool `json:"autoUpdate"`
+	// UpdatePrerelease allows auto-update to install prerelease (beta) versions.
+	// Defaults to false.
+	UpdatePrerelease bool `json:"updatePrerelease"`
+
 	// Secrets, populated from the environment (never from JSON).
 	JiraAPIToken string `json:"-"`
 	GitHubToken  string `json:"-"`
@@ -87,14 +94,16 @@ type Config struct {
 // Default returns a config with sensible defaults for the MVP.
 func Default() Config {
 	return Config{
-		Jira:            JiraConfig{},
-		MeetingIssueKey: "EDB-9071",
-		LeaveIssueKey:   "EDB-9070",
-		WorkdayHours:    7,
-		GitHub:          GitHubConfig{APIBaseURL: "https://api.github.com"},
-		MockJiraPort:    9099,
-		WebPort:         9080,
-		Target:          TargetMock,
+		Jira:             JiraConfig{},
+		MeetingIssueKey:  "EDB-9071",
+		LeaveIssueKey:    "EDB-9070",
+		WorkdayHours:     7,
+		GitHub:           GitHubConfig{APIBaseURL: "https://api.github.com"},
+		MockJiraPort:     9099,
+		WebPort:          9080,
+		Target:           TargetMock,
+		AutoUpdate:       true,
+		UpdatePrerelease: false,
 	}
 }
 

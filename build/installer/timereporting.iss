@@ -65,12 +65,14 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-; Start the tray companion (system-tray icon + auto-start).
+; Always (re)start the tray companion after install — including SILENT
+; auto-updates, so the app comes back automatically after updating.
 Filename: "{app}\tray.exe"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait
 
 ; Start the review server — it auto-opens the setup wizard in the browser
-; on first run (no config yet). Launched after tray so the tray is ready.
+; on first run (no config yet). Only on interactive installs (skipifsilent),
+; so silent auto-updates don't pop a browser window.
 Filename: "{app}\timeporting.exe"; \
   Description: "Open setup wizard now"; \
   Flags: nowait postinstall skipifsilent runhidden

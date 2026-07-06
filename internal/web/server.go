@@ -181,6 +181,10 @@ type configView struct {
 	MockJiraPort   int      `json:"mockJiraPort"`
 	WebPort        int      `json:"webPort"`
 	Target         string   `json:"target"`
+	// Pointers so a partial PUT (e.g. the wizard's final step) can omit these
+	// without resetting them to false.
+	AutoUpdate       *bool `json:"autoUpdate,omitempty"`
+	UpdatePrerelease *bool `json:"updatePrerelease,omitempty"`
 }
 
 func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
@@ -188,18 +192,20 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.cfg
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, configView{
-		JiraBaseURL:    cfg.Jira.BaseURL,
-		JiraEmail:      cfg.Jira.Email,
-		MeetingKey:     cfg.MeetingIssueKey,
-		LeaveKey:       cfg.LeaveIssueKey,
-		WorkdayHours:   cfg.WorkdayHours,
-		LocalRepos:     cfg.LocalRepos,
-		GitAuthors:     cfg.GitAuthors,
-		GitHubUsername: cfg.GitHub.Username,
-		ICSPath:        cfg.ICSPath,
-		MockJiraPort:   cfg.MockJiraPort,
-		WebPort:        cfg.WebPort,
-		Target:         cfg.Target,
+		JiraBaseURL:      cfg.Jira.BaseURL,
+		JiraEmail:        cfg.Jira.Email,
+		MeetingKey:       cfg.MeetingIssueKey,
+		LeaveKey:         cfg.LeaveIssueKey,
+		WorkdayHours:     cfg.WorkdayHours,
+		LocalRepos:       cfg.LocalRepos,
+		GitAuthors:       cfg.GitAuthors,
+		GitHubUsername:   cfg.GitHub.Username,
+		ICSPath:          cfg.ICSPath,
+		MockJiraPort:     cfg.MockJiraPort,
+		WebPort:          cfg.WebPort,
+		Target:           cfg.Target,
+		AutoUpdate:       &cfg.AutoUpdate,
+		UpdatePrerelease: &cfg.UpdatePrerelease,
 	})
 }
 
@@ -249,6 +255,12 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if v.Target != "" {
 		s.cfg.Target = v.Target
+	}
+	if v.AutoUpdate != nil {
+		s.cfg.AutoUpdate = *v.AutoUpdate
+	}
+	if v.UpdatePrerelease != nil {
+		s.cfg.UpdatePrerelease = *v.UpdatePrerelease
 	}
 	cfg := s.cfg
 	cfgPath := s.cfgPath
@@ -1456,6 +1468,16 @@ a{color:#0052cc}
     </div>
   </div>
   </details>
+  <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
+      <input type="checkbox" id="w-autoUpdate" checked style="width:16px;height:16px">
+      Keep the app up to date automatically
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:#42526e;cursor:pointer">
+      <input type="checkbox" id="w-updatePrerelease" style="width:16px;height:16px">
+      Include beta (prerelease) versions
+    </label>
+  </div>
   <div class="error" id="err-5"></div>
   <div class="btn-row">
     <button class="btn-secondary" onclick="goTo(4)">← Back</button>
@@ -1566,6 +1588,8 @@ async function saveReposAndFinish(){
       workdayHours:7, target:'mock',
       webPort:+(document.getElementById('w-webPort').value||9080),
       mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
+      autoUpdate:document.getElementById('w-autoUpdate').checked,
+      updatePrerelease:document.getElementById('w-updatePrerelease').checked,
     });
   }catch(e){ showBuildError(e.message); return; }
   startBuildStream();
@@ -1638,6 +1662,8 @@ async function prefill(){
     set('w-ics',c.icsPath);
     if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
     if(c.mockJiraPort)document.getElementById('w-mockPort').value=c.mockJiraPort;
+    if(typeof c.autoUpdate==='boolean')document.getElementById('w-autoUpdate').checked=c.autoUpdate;
+    if(typeof c.updatePrerelease==='boolean')document.getElementById('w-updatePrerelease').checked=c.updatePrerelease;
   }catch(e){/* first run: nothing to pre-fill */}
   // Detect already-saved tokens so the user can reuse them without re-pasting.
   try{
@@ -1849,6 +1875,18 @@ button.secondary:hover{background:#f4f5f7}
       <input type="number" id="mockJiraPort" min="1024" max="65535">
     </div>
   </div>
+  <div class="field">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="autoUpdate" style="width:16px;height:16px">
+      Keep the app up to date automatically
+    </label>
+  </div>
+  <div class="field">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="updatePrerelease" style="width:16px;height:16px">
+      Include beta (prerelease) versions when updating
+    </label>
+  </div>
   <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
   <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
 </section>
@@ -1909,6 +1947,8 @@ async function loadConfig() {
     document.getElementById('webPort').value = c.webPort||9080;
     document.getElementById('mockJiraPort').value = c.mockJiraPort||9099;
     document.getElementById('target').value = c.target||'mock';
+    document.getElementById('autoUpdate').checked = c.autoUpdate!==false;
+    document.getElementById('updatePrerelease').checked = c.updatePrerelease===true;
   } catch(e) { toast('Could not load config: '+e.message, true); }
 }
 
@@ -1939,6 +1979,8 @@ async function saveConfig() {
       webPort: +document.getElementById('webPort').value,
       mockJiraPort: +document.getElementById('mockJiraPort').value,
       target: document.getElementById('target').value,
+      autoUpdate: document.getElementById('autoUpdate').checked,
+      updatePrerelease: document.getElementById('updatePrerelease').checked,
     });
     document.getElementById('cfg-msg').textContent = '✅ Saved';
     document.getElementById('cfg-msg').style.color = '#00875a';
