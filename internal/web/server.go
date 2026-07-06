@@ -1039,9 +1039,37 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !body.DryRun {
+		// Move submitted worklogs to Existing, remove them from Suggested.
+		src := "real"
+		if s.activeWrite == "mock" {
+			src = "mock"
+		}
 		s.mu.Lock()
+		for i := range submitted {
+			submitted[i].Category = string(model.CategoryExisting)
+			submitted[i].Source = src
+			s.days[idx].Existing = append(s.days[idx].Existing, submitted[i])
+		}
+		// Keep only rows that were NOT submitted (already-logged duplicates, empty rows).
+		var remaining []WlogView
+		for _, wl := range s.days[idx].Suggested {
+			fp := wl.IssueKey + "|" + wl.Comment
+			if !alreadyLogged[fp] {
+				remaining = append(remaining, wl)
+			}
+		}
+		s.days[idx].Suggested = remaining
 		s.days[idx].Submitted = true
+		updatedDay := s.days[idx]
 		s.mu.Unlock()
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"submitted": submitted,
+			"dryRun":    body.DryRun,
+			"target":    writeLabel,
+			"day":       updatedDay,
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -2916,11 +2944,17 @@ async function submitRow(date, rowIdx) {
 async function submitDay(date) {
   try {
     const res = await api('POST','/days/'+date+'/submit',{dryRun:false});
-    const i = days.findIndex(d=>d.date===date);
-    if (i>=0) days[i].submitted = true;
     const n = (res.submitted||[]).length;
     toast('Submitted: '+n+' worklog(s) to '+res.target+'.');
-    await refresh(date);
+    if (res.day) {
+      // Server returns the updated day with worklogs moved to Existing.
+      const i = days.findIndex(d=>d.date===date);
+      if (i>=0) days[i] = res.day;
+      renderDetail(res.day);
+      renderList();
+    } else {
+      await refresh(date);
+    }
   } catch(e) { toast(e.message, true); }
 }
 
