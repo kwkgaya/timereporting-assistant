@@ -1983,22 +1983,19 @@ body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#1
 header{background:#0052cc;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px}
 header h1{margin:0;font-size:1.1rem;font-weight:600}
 .badge{font-size:.75rem;background:#0747a6;padding:2px 8px;border-radius:12px}
-main{display:grid;grid-template-columns:220px 1fr;height:calc(100vh - 48px)}
-/* Day list */
-#day-list{background:#fff;border-right:1px solid #dfe1e6;overflow-y:auto;padding:8px 0}
-.day-item{padding:8px 16px;cursor:pointer;border-left:3px solid transparent;user-select:none}
-.day-item:hover{background:#f4f5f7}
-.day-item.active{border-left-color:#0052cc;background:#e9f2ff}
-.day-item.done{opacity:.55}
-.day-date{font-size:.8rem;font-weight:600}
-.day-status{font-size:.75rem;color:#6b778c}
-.day-total{font-size:.75rem;float:right}
+main{height:calc(100vh - 48px);display:flex;flex-direction:column}
+#toolbar{padding:10px 20px;background:#fff;border-bottom:1px solid #dfe1e6;display:flex;align-items:center;gap:14px;font-size:.85rem;flex:none}
+#toolbar input[type=date]{font:inherit;padding:5px 8px;border:1px solid #dfe1e6;border-radius:4px}
+#incomplete-count{color:#6b778c}
 .total-ok{color:#00875a;font-weight:600}
 .total-warn{color:#ff5630;font-weight:600}
 /* Detail panel */
-#detail{padding:20px;overflow-y:auto}
-#detail h2{margin:0 0 4px;font-size:1rem}
-.meta{font-size:.8rem;color:#6b778c;margin-bottom:12px}
+#detail{padding:20px;overflow-y:auto;flex:1}
+.day-nav{display:flex;align-items:center;gap:16px;margin-bottom:12px}
+.day-nav h2{flex:1;text-align:center;margin:0;font-size:1.3rem}
+.nav-btn{font-size:1.8rem;line-height:1;background:#fff;border:1px solid #dfe1e6;border-radius:8px;padding:6px 22px;cursor:pointer;color:#0052cc}
+.nav-btn:hover{background:#e9f2ff}
+.summary-line{font-size:1.15rem;font-weight:700;margin:18px 0;padding:14px 18px;background:#fff;border:1px solid #dfe1e6;border-radius:6px}
 /* Controls */
 .controls{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
 select,button{font:inherit;border:1px solid #dfe1e6;border-radius:4px;padding:5px 10px;cursor:pointer;background:#fff}
@@ -2045,8 +2042,11 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
   </span>
 </header>
 <main>
-  <div id="day-list"></div>
-  <div id="detail"><p>Select a day on the left.</p></div>
+  <div id="toolbar">
+    <label>📅 Jump to day: <input type="date" id="date-picker" onchange="onPickDate(this.value)"></label>
+    <span id="incomplete-count"></span>
+  </div>
+  <div id="detail"><p>Loading…</p></div>
 </main>
 <div id="toast"></div>
 <script>
@@ -2083,22 +2083,46 @@ function totalMins(day) {
        + (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
 }
 
+function isIncomplete(day) {
+  return !day.submitted && totalMins(day) < 420;
+}
+
+// renderList updates the date picker bounds/value and the incomplete-day count.
 function renderList() {
-  const el = document.getElementById('day-list');
-  el.innerHTML = days.map(d => {
-    const t = totalMins(d);
-    const cls = [
-      'day-item',
-      d.date===currentDate?'active':'',
-      d.submitted?'done':'',
-    ].filter(Boolean).join(' ');
-    const totCls = t>=420?'total-ok':'total-warn';
-    return '<div class="'+cls+'" onclick="selectDay(\''+d.date+'\')">'
-      +'<span class="day-date">'+d.date+'</span>'
-      +'<span class="day-total '+totCls+'">'+hm(t)+'</span>'
-      +'<br><span class="day-status">'+d.weekday+' &bull; '+d.status+'</span>'
-      +'</div>';
-  }).join('');
+  const picker = document.getElementById('date-picker');
+  if (picker && days.length) {
+    picker.min = days[0].date;
+    picker.max = days[days.length-1].date;
+    if (currentDate) picker.value = currentDate;
+  }
+  const el = document.getElementById('incomplete-count');
+  if (el) {
+    const inc = days.filter(isIncomplete).length;
+    el.textContent = inc ? ('⚠ '+inc+' incomplete day(s)') : 'All days complete ✓';
+    el.style.color = inc ? '#ff5630' : '#00875a';
+  }
+}
+
+// onPickDate jumps to the selected day, snapping to the nearest planned day.
+function onPickDate(value) {
+  if (!value || !days.length) return;
+  let d = days.find(x=>x.date===value)
+       || days.find(x=>x.date>=value)
+       || days[days.length-1];
+  if (d) selectDay(d.date);
+}
+
+// gotoIncomplete moves to the next/previous incomplete day (dir = +1 / -1).
+function gotoIncomplete(dir) {
+  if (!days.length) return;
+  let i = days.findIndex(d=>d.date===currentDate);
+  if (i < 0) i = 0;
+  for (let step=1; step<=days.length; step++) {
+    const j = i + dir*step;
+    if (j < 0 || j >= days.length) break;
+    if (isIncomplete(days[j])) { selectDay(days[j].date); return; }
+  }
+  toast(dir>0 ? 'No more incomplete days ahead.' : 'No earlier incomplete days.');
 }
 
 function renderDetail(day) {
@@ -2108,11 +2132,12 @@ function renderDetail(day) {
   const total = existMins + suggMins;
   const totalCls = total>=420?'total-ok':'total-warn';
 
-  let html = '<h2>'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
-    +(day.submitted?' <span class="badge-submitted">Submitted</span>':'')+'</h2>';
-  html += '<div class="meta">Target: 7h &bull; Existing: '+hm(existMins)
-    +' &bull; Suggested: '+hm(suggMins)
-    +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
+  let html = '<div class="day-nav">'
+    +'<button class="nav-btn" onclick="gotoIncomplete(-1)" title="Previous incomplete day">‹</button>'
+    +'<h2>'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
+    +(day.submitted?' <span class="badge-submitted">Submitted</span>':'')+'</h2>'
+    +'<button class="nav-btn" onclick="gotoIncomplete(1)" title="Next incomplete day">›</button>'
+    +'</div>';
 
   // Controls
   html += '<div class="controls">';
@@ -2168,6 +2193,11 @@ function renderDetail(day) {
       +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
   }
   html += '</table>';
+
+  // Summary — moved below the suggested worklogs, larger & bolder.
+  html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
+    +' &bull; Suggested: '+hm(suggMins)
+    +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
 
   // Notes (below the suggested worklogs)
   if (day.notes && day.notes.length) {
@@ -2440,7 +2470,10 @@ async function init() {
     await refreshBadge();
     days = await api('GET','/days');
     renderList();
-    if (days.length) selectDay(days[0].date);
+    if (days.length) {
+      const first = days.find(isIncomplete) || days[0];
+      selectDay(first.date);
+    }
   } catch(e) { toast('Failed to load days: '+e.message, true); }
 }
 
