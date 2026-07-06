@@ -2355,7 +2355,7 @@ main{display:grid;grid-template-columns:230px 1fr;height:calc(100vh - 48px)}
 .day-nav h2{flex:1;text-align:center;margin:0;font-size:1.3rem}
 .nav-btn{font-size:1.8rem;line-height:1;background:#fff;border:1px solid #dfe1e6;border-radius:8px;padding:6px 22px;cursor:pointer;color:#0052cc}
 .nav-btn:hover{background:#e9f2ff}
-.summary-line{font-size:1.15rem;font-weight:700;margin:18px 0;padding:14px 18px;background:#fff;border:1px solid #dfe1e6;border-radius:6px}
+.summary-line{font-size:1rem;font-weight:700;margin:18px 0;padding:10px 0;display:flex;align-items:center;gap:0;flex-wrap:wrap}
 /* Controls */
 .controls{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
 select,button{font:inherit;border:1px solid #dfe1e6;border-radius:4px;padding:5px 10px;cursor:pointer;background:#fff}
@@ -2681,9 +2681,15 @@ function renderDetail(day) {
 
   // Summary line — shown when day is not already full from Jira.
   if (!dayFull) {
-    html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
-      +' &bull; Suggested: '+hm(suggMins)
-      +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
+    html += '<div class="summary-line">'
+      +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">7h</strong></span>'
+      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+      +'<span style="color:#6b778c">Existing: <strong style="color:#172b4d">'+hm(existMins)+'</strong></span>'
+      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+      +'<span style="color:#6b778c">Suggested: <strong style="color:#0052cc">'+hm(suggMins)+'</strong></span>'
+      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+      +'<span style="color:#6b778c">Total: <strong class="'+totalCls+'">'+hm(total)+'</strong></span>'
+      +'</div>';
   }
 
   // Submit actions — only when day still has unsubmitted rows that cover remaining time.
@@ -2700,9 +2706,9 @@ function renderDetail(day) {
     html += '<div class="notes" style="margin-top:14px">ℹ️ '+day.notes.join(' | ')+'</div>';
   }
 
-  // Unassigned activity + Revo prompt (#12) — below the suggested worklogs
+  // Unassigned activity + Rovo prompt (#12) — below the suggested worklogs
   if (day.unassigned && day.unassigned.length) {
-    html += '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Revo</summary>';
+    html += '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Rovo</summary>';
     html += '<div style="background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:10px 14px;margin-top:6px">';
     html += '<table style="font-size:.82rem;width:100%;border-collapse:collapse;margin-bottom:8px">'
       +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
@@ -2710,7 +2716,7 @@ function renderDetail(day) {
       html += '<tr><td style="padding:3px 8px;color:#6b778c">'+esc(a.source)+'</td><td style="padding:3px 8px">'+esc(a.text)+'</td></tr>';
     });
     html += '</table>';
-    html += '<button class="secondary" style="font-size:.8rem" onclick="copyRevoPrompt(\''+day.date+'\')">📋 Copy Revo prompt</button>';
+    html += '<button class="secondary" style="font-size:.8rem" onclick="copyRovoPrompt(\''+day.date+'\')">📋 Copy Rovo prompt</button>';
     html += '<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Paste into Rovo AI in Jira to find the right task, then add rows above.</span>';
     html += '</div></details>';
   }
@@ -2916,13 +2922,13 @@ async function saveSuggested(date, suggested) {
   } catch(e) { toast(e.message, true); }
 }
 
-function copyRevoPrompt(date) {
+function copyRovoPrompt(date) {
   const day = days.find(d=>d.date===date);
   if (!day || !day.unassigned || !day.unassigned.length) return;
   const items = day.unassigned.map(a => '- '+a.text+(a.ref?' ('+a.ref+')':'')).join('\n');
   const text = 'On '+date+' I worked on the following (the commits/PRs below have no clear Jira task key):\n'+items+'\n\nWhich Jira task(s) in my active projects should I log time against for these activities?';
   navigator.clipboard.writeText(text).then(
-    () => toast('Revo prompt copied to clipboard — paste into Rovo AI in Jira.'),
+    () => toast('Rovo prompt copied to clipboard — paste into Rovo AI in Jira.'),
     () => {
       // Fallback: show in a prompt for manual copy.
       window.prompt('Copy this prompt and paste into Rovo AI in Jira:', text);
