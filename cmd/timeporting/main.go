@@ -238,10 +238,53 @@ func runMain() {
 
 	plans, mockClient, realClient, _ := buildPlans(cfg, nil)
 
+	// buildDay builds a single day on demand (for out-of-range date navigation).
+	buildDay := func(c config.Config, day time.Time) (model.DayPlan, error) {
+		mb := jira.NewClient(fmt.Sprintf("http://localhost:%d", c.MockJiraPort), "", "")
+		var rb *jira.Client
+		if c.Jira.BaseURL != "" && c.JiraAPIToken != "" {
+			rb = jira.NewClient(c.JiraAPIBase(), c.Jira.Email, c.JiraAPIToken)
+		}
+		var rc *jira.Client
+		switch c.Target {
+		case config.TargetReal, config.TargetMockWrite:
+			rc = rb
+		}
+		if rc == nil {
+			rc = mb
+		}
+		existing, _ := rc.ExistingWorklogsByDay(c.Jira.Email, day, day)
+		if existing == nil {
+			existing = map[string][]model.Worklog{}
+		}
+		var meetings []model.Meeting
+		if c.ICSPath != "" {
+			meetings, _ = ics.ParseFile(c.ICSPath)
+		}
+		gc := activity.NewGitCollector(c.LocalRepos, c.GitAuthors)
+		var ghc *activity.GitHubCollector
+		if c.GitHub.Username != "" {
+			ghc = activity.NewGitHubCollector(c.GitHub.APIBaseURL, c.GitHub.Username, c.GitHubToken)
+		}
+		ec := engine.DefaultConfig(c.WorkdayHours, c.MeetingIssueKey, c.LeaveIssueKey)
+		dk := day.Format("2006-01-02")
+		ex := existing[dk]
+		mm := ics.TotalMinutesForDay(meetings, day)
+		var acts []model.Activity
+		la, _ := gc.CollectForDay(day)
+		acts = append(acts, la...)
+		if ghc != nil {
+			ga, _ := ghc.CollectForDay(day)
+			acts = append(acts, ga...)
+		}
+		return engine.BuildDayPlan(ec, day, model.StatusWorking, ex, mm, acts), nil
+	}
+
 	// ── Web review UI ──────────────────────────────────────────────────────
 	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
 		WithConfig(cfg, *cfgPath).
-		WithPlanBuilder(web.PlanBuilder(buildPlans))
+		WithPlanBuilder(web.PlanBuilder(buildPlans)).
+		WithDayBuilder(web.DayBuilder(buildDay))
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))

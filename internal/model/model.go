@@ -118,9 +118,14 @@ func WorklogStart(day time.Time) time.Time {
 	return d.Add(12 * time.Hour)
 }
 
+// IsWeekday reports whether t falls on Monday–Friday.
+func IsWeekday(t time.Time) bool {
+	w := t.UTC().Weekday()
+	return w != time.Saturday && w != time.Sunday
+}
+
 // Weekdays returns the list of Mon-Fri days in [start, end] inclusive (UTC).
-func Weekdays(start, end time.Time) []time.Time {
-	var days []time.Time
+func Weekdays(start, end time.Time) []time.Time {	var days []time.Time
 	for d := Day(start); !d.After(Day(end)); d = d.AddDate(0, 0, 1) {
 		switch d.Weekday() {
 		case time.Saturday, time.Sunday:

@@ -61,6 +61,10 @@ type PlanBuilder func(cfg config.Config, progress ProgressFunc) ([]model.DayPlan
 // (total may be 0 for phase-only messages); phase is a human-readable status.
 type ProgressFunc func(done, total int, phase string)
 
+// DayBuilder builds a single day's plan on demand. Used when the user navigates
+// to a date that wasn't in the initially loaded range.
+type DayBuilder func(cfg config.Config, date time.Time) (model.DayPlan, error)
+
 // Server holds the state for the web review session.
 type Server struct {
 	mu          sync.Mutex
@@ -74,6 +78,7 @@ type Server struct {
 	cfg         config.Config // current config (for settings page)
 	cfgPath     string        // path to config.json (for saving)
 	planBuilder PlanBuilder   // called on reload to rebuild day plans
+	dayBuilder  DayBuilder    // called to build a single day on demand
 }
 
 // New creates a Server. mockClient always writes to the mock; realClient (may be
@@ -116,6 +121,14 @@ func (s *Server) WithConfig(cfg config.Config, cfgPath string) *Server {
 func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
 	s.mu.Lock()
 	s.planBuilder = fn
+	s.mu.Unlock()
+	return s
+}
+
+// WithDayBuilder attaches the on-demand single-day builder.
+func (s *Server) WithDayBuilder(fn DayBuilder) *Server {
+	s.mu.Lock()
+	s.dayBuilder = fn
 	s.mu.Unlock()
 	return s
 }
@@ -847,10 +860,38 @@ func (s *Server) apiGetDay(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		d = s.days[idx]
 	}
+	builder := s.dayBuilder
+	cfg := s.cfg
 	s.mu.Unlock()
+
 	if !ok {
-		writeErr(w, http.StatusNotFound, "date not found: "+date)
-		return
+		// Date is outside the initially loaded range — build it on demand.
+		if builder == nil {
+			writeErr(w, http.StatusNotFound, "date not found: "+date)
+			return
+		}
+		t, err := time.Parse("2006-01-02", date)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid date: "+date)
+			return
+		}
+		if !model.IsWeekday(t) {
+			writeErr(w, http.StatusBadRequest, "not a weekday: "+date)
+			return
+		}
+		plan, err := builder(cfg, t)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "build day: "+err.Error())
+			return
+		}
+		d = planToView(plan)
+		// Cache it so subsequent edits/submits work.
+		s.mu.Lock()
+		if _, exists := s.dayIndex[date]; !exists {
+			s.dayIndex[date] = len(s.days)
+			s.days = append(s.days, d)
+		}
+		s.mu.Unlock()
 	}
 	writeJSON(w, http.StatusOK, d)
 }
@@ -2156,9 +2197,17 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .badge-submitted{background:#00875a;color:#fff;padding:2px 8px;border-radius:12px;font-size:.75rem}
 .badge-target{background:#ff991f;color:#172b4d;padding:2px 8px;border-radius:12px;font-size:.75rem}
 #toast{position:fixed;bottom:20px;right:20px;background:#172b4d;color:#fff;padding:10px 18px;border-radius:6px;display:none;font-size:.85rem;z-index:999}
+#day-overlay{position:fixed;inset:0;background:rgba(255,255,255,.88);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:600}
+.spinner{width:52px;height:52px;border:5px solid #dfe1e6;border-top-color:#0052cc;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#day-overlay-msg{margin-top:18px;font-size:1.05rem;font-weight:600;color:#172b4d}
 </style>
 </head>
 <body>
+<div id="day-overlay" aria-live="polite" aria-busy="true">
+  <div class="spinner"></div>
+  <div id="day-overlay-msg">Building day plan…</div>
+</div>
 <header>
   <h1>Timereporting Assistant</h1>
   <span id="target-badge" class="badge">loading…</span>
@@ -2243,13 +2292,41 @@ function todayStr() {
   return d.getFullYear()+'-'+m+'-'+day;
 }
 
-// onPickDate jumps to the selected day, snapping to the nearest planned day.
-function onPickDate(value) {
-  if (!value || !days.length) return;
-  let d = days.find(x=>x.date===value)
-       || days.find(x=>x.date>=value)
-       || days[days.length-1];
-  if (d) selectDay(d.date);
+// onPickDate jumps to the selected day. If it isn't loaded yet, fetches it from
+// the server (which builds it on demand) while showing a blocking spinner.
+async function onPickDate(value) {
+  if (!value) return;
+  const exact = days.find(x=>x.date===value);
+  if (exact) { selectDay(exact.date); return; }
+  // Date not in loaded range — fetch on demand.
+  await fetchAndShowDay(value);
+}
+
+// fetchAndShowDay fetches a single day from the server (building it on demand),
+// shows a spinner overlay while loading, then renders the result.
+async function fetchAndShowDay(date) {
+  showOverlay('Building plan for '+date+'…');
+  try {
+    const day = await api('GET','/days/'+date);
+    // Add to local cache so edits/submits work.
+    if (!days.find(d=>d.date===date)) days.push(day);
+    currentDate = date;
+    renderList();
+    renderDetail(day);
+  } catch(e) {
+    toast(e.message || 'Could not build plan for '+date, true);
+  } finally {
+    hideOverlay();
+  }
+}
+
+function showOverlay(msg) {
+  const ov = document.getElementById('day-overlay');
+  document.getElementById('day-overlay-msg').textContent = msg || 'Building day plan…';
+  ov.style.display = 'flex';
+}
+function hideOverlay() {
+  document.getElementById('day-overlay').style.display = 'none';
 }
 
 // gotoIncomplete moves to the next/previous incomplete day (dir = +1 / -1).
