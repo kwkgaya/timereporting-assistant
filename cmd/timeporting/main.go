@@ -328,6 +328,21 @@ func runMain() {
 				existing[dk] = append(existing[dk], wls...)
 			}
 		}
+		ec := engine.DefaultConfig(c.WorkdayHours, c.MeetingIssueKey, c.LeaveIssueKey)
+		dk := day.Format("2006-01-02")
+		ex := existing[dk]
+
+		// Fast path: if existing Jira worklogs already reach the daily target,
+		// skip the git/ICS/GitHub scan entirely. The spinner shows briefly for
+		// the Jira fetch above, but the slow git scan is avoided.
+		totalExisting := 0
+		for _, wl := range ex {
+			totalExisting += wl.Minutes
+		}
+		if totalExisting >= ec.WorkdayMinutes {
+			return engine.BuildDayPlan(ec, day, model.StatusWorking, ex, 0, nil), nil
+		}
+
 		var meetings []model.Meeting
 		if c.ICSPath != "" {
 			meetings, _ = ics.ParseFile(c.ICSPath)
@@ -337,9 +352,6 @@ func runMain() {
 		if c.GitHub.Username != "" {
 			ghc = activity.NewGitHubCollector(c.GitHub.APIBaseURL, c.GitHub.Username, c.GitHubToken)
 		}
-		ec := engine.DefaultConfig(c.WorkdayHours, c.MeetingIssueKey, c.LeaveIssueKey)
-		dk := day.Format("2006-01-02")
-		ex := existing[dk]
 		mm := ics.TotalMinutesForDay(meetings, day)
 		dayStatus := model.StatusWorking
 		if ics.IsHolidayDay(meetings, day) {
