@@ -398,7 +398,7 @@ func checkForUpdates(cfg config.Config, version string, manual bool) {
 	}
 	log.Printf("update available: %s (current %s)", rel.TagName, version)
 	if manual {
-		showToast("Updating Timereporting", "Downloading "+rel.TagName+"…", "")
+		showToast("Updating Timereporting Assistant", "Downloading "+rel.TagName+"…", "")
 	}
 	dir := filepath.Join(os.TempDir(), "timereporting-update")
 	path, err := chk.Download(rel, dir)
