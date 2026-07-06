@@ -154,18 +154,10 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 	if len(grouped.Groups) == 0 {
 		if len(grouped.Unassigned) > 0 {
 			// Git/GitHub activity exists but none could be mapped to a Jira key.
-			// Don't assume leave — let the user pick the task manually.
 			notes = append(notes, "unable to determine the Jira task from available activity — please assign manually")
 		} else {
-			// No activity at all: pre-fill leave task so the day isn't blank.
-			notes = append(notes, "no activity found: pre-filled leave task suggestion")
-			plan.Suggested = append(plan.Suggested, model.Worklog{
-				IssueKey: cfg.LeaveIssueKey,
-				Minutes:  remaining,
-				Comment:  fmt.Sprintf("No activity found for %s — please review", started.Format("2006-01-02")),
-				Category: model.CategoryLeave,
-				Started:  started,
-			})
+			// No activity: leave suggestions empty — user can pick a task from the dropdown.
+			notes = append(notes, "no activity found — select a task from the search box to log time")
 		}
 		plan.Notes = notes
 		return plan

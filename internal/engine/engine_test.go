@@ -133,14 +133,14 @@ func TestHalfLeaveDay(t *testing.T) {
 	}
 }
 
-func TestNoActivityPreFillsLeaveTask(t *testing.T) {
+func TestNoActivityLeavesEmpty(t *testing.T) {
 	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, nil, nil, nil)
 
-	if len(plan.Suggested) != 1 {
-		t.Fatalf("suggested = %d, want 1 (leave task pre-fill)", len(plan.Suggested))
+	if len(plan.Suggested) != 0 {
+		t.Errorf("suggested = %d, want 0 (no pre-fill when no activity)", len(plan.Suggested))
 	}
-	if plan.Suggested[0].IssueKey != testCfg.LeaveIssueKey {
-		t.Errorf("pre-fill key = %q, want leave key", plan.Suggested[0].IssueKey)
+	if len(plan.Notes) == 0 {
+		t.Error("expected a note about no activity")
 	}
 }
 
