@@ -2646,6 +2646,7 @@ function renderDetail(day) {
   const suggMins = (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
   const total = existMins + suggMins;
   const totalCls = total>=420?'total-ok':'total-warn';
+  const dayFull = existMins >= 420;
 
   let html = '<div class="day-nav">'
     +'<button class="nav-btn" onclick="gotoDay(-1)" title="Previous day">‹</button>'
@@ -2705,7 +2706,6 @@ function renderDetail(day) {
   }
 
   // Suggested worklogs — hidden when existing Jira time already reaches the target.
-  const dayFull = existMins >= 420;
   if (!dayFull) {
     html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
     html += '<table id="sugg-table" class="wl-table"><colgroup><col style="width:52px"><col><col style="width:92px"><col><col style="width:72px"></colgroup>';
