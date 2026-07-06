@@ -110,6 +110,29 @@ func Load(path string) (Config, error) {
 		cfg.GitHubToken = os.Getenv(EnvGitHubToken)
 	}
 
+	// Self-heal: an on-disk config may have blank required scalar fields (for
+	// example, left over from an earlier partial-save bug). Empty means "not
+	// set", so fall back to the built-in defaults instead of failing
+	// validation and refusing to start.
+	def := Default()
+	if cfg.MeetingIssueKey == "" {
+		cfg.MeetingIssueKey = def.MeetingIssueKey
+	}
+	if cfg.LeaveIssueKey == "" {
+		cfg.LeaveIssueKey = def.LeaveIssueKey
+	}
+	if cfg.WorkdayHours <= 0 {
+		cfg.WorkdayHours = def.WorkdayHours
+	}
+	if cfg.MockJiraPort == 0 {
+		cfg.MockJiraPort = def.MockJiraPort
+	}
+	if cfg.WebPort == 0 {
+		cfg.WebPort = def.WebPort
+	}
+	if cfg.GitHub.APIBaseURL == "" {
+		cfg.GitHub.APIBaseURL = def.GitHub.APIBaseURL
+	}
 	if cfg.Target == "" {
 		cfg.Target = TargetMock
 	}
