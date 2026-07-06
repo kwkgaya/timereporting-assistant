@@ -302,13 +302,13 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		if len(parts) >= 4 && parts[3] != "" {
 			ref = parts[3] + commitTime
 		} else {
-			ref = commitTime
+			ref = strings.TrimSpace(commitTime)
 		}
 		acts = append(acts, model.Activity{
 			Date:   day,
 			Source: SourceLocalGit,
 			Text:   subject,
-			Ref:    strings.TrimSpace(repoPath + " " + ref),
+			Ref:    strings.TrimSpace(ref),
 		})
 	}
 	return acts, newHashes, nil
@@ -366,11 +366,11 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		if t, err := time.Parse(time.RFC3339, parts[2]); err == nil {
 			commitTime = t.Format("15:04")
 		}
-		ref := repoPath
+		ref := ""
 		if commitTime != "" {
-			ref += " " + commitTime + " (reflog)"
+			ref = commitTime + " (reflog)"
 		} else {
-			ref += " (reflog)"
+			ref = "(reflog)"
 		}
 		acts = append(acts, model.Activity{
 			Date:   day,
