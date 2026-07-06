@@ -889,8 +889,10 @@ func (s *Server) apiPutDay(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	idx, ok := s.dayIndex[date]
 	if ok {
-		if body.Status != "" {
+		if body.Status != "" && body.Status != s.days[idx].Status {
 			s.days[idx].Status = body.Status
+			// Rebuild suggested worklogs to match the new status.
+			s.days[idx].Suggested = s.rebuildSuggestionsForStatus(idx, date)
 		}
 		if body.Suggested != nil {
 			s.days[idx].Suggested = body.Suggested
@@ -906,6 +908,59 @@ func (s *Server) apiPutDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// rebuildSuggestionsForStatus returns appropriate suggested worklogs for the given
+// day index based on its current status. Called with s.mu held.
+func (s *Server) rebuildSuggestionsForStatus(idx int, date string) []WlogView {
+	day := s.days[idx]
+	cfg := s.cfg
+	target := int(cfg.WorkdayHours * 60)
+	existingMins := 0
+	for _, w := range day.Existing {
+		existingMins += w.Minutes
+	}
+	remaining := target - existingMins
+	if remaining <= 0 {
+		return nil
+	}
+	t, _ := time.Parse("2006-01-02", date)
+	started := model.WorklogStart(t)
+	_ = started
+
+	switch day.Status {
+	case string(model.StatusHoliday):
+		return []WlogView{{IssueKey: cfg.LeaveIssueKey, Minutes: remaining, Comment: "Public holiday", Category: string(model.CategoryLeave)}}
+	case string(model.StatusFullLeave):
+		return []WlogView{{IssueKey: cfg.LeaveIssueKey, Minutes: remaining, Comment: "Full-day leave", Category: string(model.CategoryLeave)}}
+	case string(model.StatusHalfLeave):
+		half := roundToNearest30(target / 2)
+		workMins := target - half - existingMins
+		var out []WlogView
+		if half > 0 {
+			out = append(out, WlogView{IssueKey: cfg.LeaveIssueKey, Minutes: half, Comment: "Half-day leave", Category: string(model.CategoryLeave)})
+		}
+		if workMins > 0 {
+			out = append(out, WlogView{IssueKey: "", Minutes: workMins, Comment: "", Category: string(model.CategoryManual)})
+		}
+		return out
+	default: // working — trigger a full rebuild if a builder is available
+		if s.dayBuilder != nil {
+			plan, err := s.dayBuilder(cfg, t)
+			if err == nil {
+				var out []WlogView
+				for _, wl := range plan.Suggested {
+					out = append(out, WlogView{IssueKey: wl.IssueKey, Minutes: wl.Minutes, Comment: wl.Comment, Category: string(wl.Category)})
+				}
+				return out
+			}
+		}
+		return day.Suggested // keep existing if rebuild fails
+	}
+}
+
+func roundToNearest30(mins int) int {
+	return ((mins + 15) / 30) * 30
 }
 
 // apiSubmitDay writes the day's Suggested worklogs to Jira and marks it submitted.
@@ -2599,14 +2654,17 @@ function renderDetail(day) {
     +'<button class="nav-btn" onclick="gotoDay(1)" title="Next day">›</button>'
     +'</div>';
 
-  // Controls
+  // Controls — status selector is disabled for submitted or fully-complete days.
+  const statusLocked = day.submitted || dayFull;
   html += '<div class="controls">';
   html += '<label><strong>Day status:</strong> '
-    + '<select id="status-sel" onchange="saveStatus(\''+day.date+'\')">'
+    + '<select id="status-sel" '+(statusLocked?'disabled title="Day is already complete — status cannot be changed"':'')+' onchange="saveStatus(\''+day.date+'\')">'
     + ['working','holiday','full_leave','half_leave'].map(s=>
         '<option value="'+s+'"'+(day.status===s?' selected':'')+'>'+s.replace('_',' ')+'</option>'
       ).join('')
-    +'</select></label>';
+    +'</select>'
+    +(statusLocked?'<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Day complete — status locked</span>':'')
+    +'</label>';
   if (!day.submitted) {
     html += '<button onclick="clonePrev(\''+day.date+'\')">Clone previous day</button>';
   }
@@ -2757,6 +2815,7 @@ function getDayLocal(date) { return days.find(d=>d.date===date); }
 
 async function saveStatus(date) {
   const sel = document.getElementById('status-sel');
+  showOverlay('Updating day status…');
   try {
     const updated = await api('PUT','/days/'+date, {status: sel.value});
     const i = days.findIndex(d=>d.date===date);
@@ -2764,6 +2823,7 @@ async function saveStatus(date) {
     renderDetail(updated);
     renderList();
   } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
 }
 
 function editRow(date, idx, field, value) {
