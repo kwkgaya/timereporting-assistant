@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/reload/stream", s.apiReloadStream)
 	mux.HandleFunc("GET /api/issue", s.apiGetIssue)
 	mux.HandleFunc("GET /api/issues/search", s.apiSearchIssues)
+	mux.HandleFunc("POST /api/mock/clear-worklogs", s.apiClearMockWorklogs)
 	mux.HandleFunc("GET /api/credentials/status", s.apiCredentialStatus)
 	mux.HandleFunc("POST /api/credentials/jira", s.apiSetJiraCredentials)
 	mux.HandleFunc("POST /api/credentials/github", s.apiSetGitHubCredentials)
@@ -446,6 +447,31 @@ func (s *Server) apiSearchIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// apiClearMockWorklogs wipes all worklogs from the mock Jira server (testing
+// convenience). It never touches real Jira.
+func (s *Server) apiClearMockWorklogs(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	port := s.cfg.MockJiraPort
+	s.mu.Unlock()
+	if port == 0 {
+		port = 9099
+	}
+	url := fmt.Sprintf("http://localhost:%d/admin/clear-worklogs", port)
+	resp, err := http.Post(url, "application/json", nil)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "mock Jira not reachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("mock Jira returned %d", resp.StatusCode))
+		return
+	}
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
@@ -1889,6 +1915,11 @@ button.secondary:hover{background:#f4f5f7}
   </div>
   <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
   <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
+  <div style="margin-top:18px;padding-top:14px;border-top:1px solid #dfe1e6">
+    <button class="secondary" onclick="clearMockWorklogs()">🧹 Clear all mock Jira worklogs</button>
+    <span id="clear-msg" style="margin-left:12px;font-size:.82rem"></span>
+    <div class="hint">Wipes every worklog from the mock Jira server so you can test submitting again from a clean slate. Never touches real Jira.</div>
+  </div>
 </section>
 
 </main>
@@ -2030,6 +2061,19 @@ async function saveAndRebuild() {
   } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
 }
 
+async function clearMockWorklogs() {
+  if (!confirm('Delete ALL worklogs from the mock Jira server? (Real Jira is not affected.)')) return;
+  const msg = document.getElementById('clear-msg');
+  msg.textContent = 'Clearing…'; msg.style.color = '#6b778c';
+  try {
+    const res = await api('POST','/mock/clear-worklogs');
+    msg.textContent = '✅ Cleared '+(res.deleted!=null?res.deleted:'all')+' worklog(s). Rebuilding…';
+    msg.style.color = '#00875a';
+    await api('POST','/reload');
+    msg.textContent = '✅ Mock worklogs cleared and plans rebuilt.';
+  } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
+}
+
 async function uploadICS(input, targetId) {
   if (!input.files || !input.files[0]) return;
   const fd = new FormData();
@@ -2123,14 +2167,14 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
            title="Toggle between Mock Jira (safe) and Real Jira (writes to your timesheet)">
       <input type="checkbox" id="real-jira-chk" onchange="onTargetCheckbox(this.checked)"
              style="width:16px;height:16px;cursor:pointer">
-      <span id="target-chk-label" style="font-weight:600">Submit to: Mock Jira</span>
+      <span id="target-chk-label" style="font-weight:600">Submit to Real Jira</span>
     </label>
     <a href="/settings" style="color:#fff;font-size:.8rem;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
   </span>
 </header>
 <main>
   <div id="toolbar">
-    <label>📅 Jump to day: <input type="date" id="date-picker" onchange="onPickDate(this.value)"></label>
+    <label>📅 Jump to day: <input type="date" id="date-picker" onchange="onPickDate(this.value)" oninput="onPickDate(this.value)"></label>
     <span id="incomplete-count"></span>
   </div>
   <div id="detail"><p>Loading…</p></div>
@@ -2174,14 +2218,10 @@ function isIncomplete(day) {
   return !day.submitted && totalMins(day) < 420;
 }
 
-// renderList updates the date picker bounds/value and the incomplete-day count.
+// renderList updates the date picker value and the incomplete-day count.
 function renderList() {
   const picker = document.getElementById('date-picker');
-  if (picker && days.length) {
-    picker.min = days[0].date;
-    picker.max = days[days.length-1].date;
-    if (currentDate) picker.value = currentDate;
-  }
+  if (picker && currentDate) picker.value = currentDate;
   const el = document.getElementById('incomplete-count');
   if (el) {
     const inc = days.filter(isIncomplete).length;
@@ -2260,10 +2300,9 @@ function renderDetail(day) {
   (day.suggested||[]).forEach((w,i) => {
     const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
     const submitted = w.submitted;
-    const tid = 'title-'+day.date+'-'+i;
+    const kid = 'key-'+day.date+'-'+i;
     html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
-      +'<td><input type="text" value="'+esc(w.issueKey)+'" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)">'
-        +'<div class="issue-title" id="'+tid+'"></div></td>'
+      +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
       +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
       +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
       +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
@@ -2324,9 +2363,9 @@ function renderDetail(day) {
 
   el.innerHTML = html;
 
-  // Lazy-load issue titles for the suggested rows.
+  // Lazy-load issue titles for the suggested rows (shown inline in the key box).
   (day.suggested||[]).forEach((w,i) => {
-    if (w.issueKey) fetchIssueTitle(w.issueKey, 'title-'+day.date+'-'+i);
+    if (w.issueKey) fetchIssueTitle(w.issueKey, 'key-'+day.date+'-'+i);
   });
 }
 
@@ -2361,8 +2400,20 @@ function editRow(date, idx, field, value) {
 
 // editRowKey updates the issue key and refreshes the displayed title.
 function editRowKey(date, idx, value) {
-  editRow(date, idx, 'issueKey', value);
-  fetchIssueTitle(value, 'title-'+date+'-'+idx);
+  const key = parseIssueKey(value);
+  const day = getDayLocal(date);
+  if (!day) return;
+  day.suggested[idx].issueKey = key;
+  saveSuggested(date, day.suggested);
+  fetchIssueTitle(key, 'key-'+date+'-'+idx);
+}
+
+// parseIssueKey extracts the Jira key from a value that may include the title,
+// e.g. "EDB-100 — Do the thing" -> "EDB-100".
+function parseIssueKey(raw) {
+  raw = (''+raw).trim();
+  const m = raw.match(/^[A-Za-z][A-Za-z0-9]*-\d+/);
+  return m ? m[0].toUpperCase() : raw.toUpperCase();
 }
 
 // parseDuration converts a Jira-style duration (1h, 30m, 1h 30m) to minutes.
@@ -2399,24 +2450,24 @@ function editRowTime(date, idx, value) {
   renderList();
 }
 
-// fetchIssueTitle looks up a Jira issue summary and shows it in the given element.
+// fetchIssueTitle looks up a Jira issue summary and shows "KEY — Title" in the
+// given key input (without clobbering the field while the user is typing).
 const issueTitleCache = {};
 async function fetchIssueTitle(key, elId) {
   const el = document.getElementById(elId);
   if (!el || !key) return;
   key = (''+key).trim().toUpperCase();
-  if (!key) { el.textContent = ''; return; }
-  if (issueTitleCache[key] !== undefined) { el.textContent = issueTitleCache[key]; return; }
-  try {
-    const r = await fetch('/api/issue?key='+encodeURIComponent(key));
-    if (r.ok) {
-      const d = await r.json();
-      issueTitleCache[key] = d.summary || '';
-    } else {
-      issueTitleCache[key] = '';
-    }
-  } catch (_) { issueTitleCache[key] = ''; }
-  el.textContent = issueTitleCache[key];
+  if (!key) return;
+  let summary = issueTitleCache[key];
+  if (summary === undefined) {
+    try {
+      const r = await fetch('/api/issue?key='+encodeURIComponent(key));
+      summary = r.ok ? ((await r.json()).summary || '') : '';
+    } catch (_) { summary = ''; }
+    issueTitleCache[key] = summary;
+  }
+  if (document.activeElement === el) return; // don't overwrite while editing
+  el.value = summary ? (key + ' — ' + summary) : key;
 }
 
 function deleteRow(date, idx) {
@@ -2585,10 +2636,10 @@ async function refreshBadge() {
   chk.checked = isReal;
   chk.disabled = !status.realAvailable;
   if (isReal) {
-    lbl.textContent = '⚠ Submit to: Real Jira';
+    lbl.textContent = '⚠ Submitting to Real Jira';
     lbl.style.color = '#ffebe6';
   } else {
-    lbl.textContent = 'Submit to: Mock Jira';
+    lbl.textContent = 'Submit to Real Jira';
     lbl.style.color = '#fff';
   }
 }

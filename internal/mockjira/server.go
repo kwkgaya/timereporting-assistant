@@ -116,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rest/api/3/search/jql", s.handleSearch)
 	// Keep old path for backward-compat with existing tests.
 	mux.HandleFunc("GET /rest/api/3/search", s.handleSearch)
+	// Testing convenience: wipe all worklogs so a run can be repeated cleanly.
+	mux.HandleFunc("POST /admin/clear-worklogs", s.handleClearWorklogs)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
 }
@@ -323,6 +325,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // tildeRe extracts the term from a JQL clause like `text ~ "foo*"`.
 var tildeRe = regexp.MustCompile(`~\s*"([^"]*)"`)
+
+// handleClearWorklogs deletes all worklogs (a testing convenience so a run can
+// be repeated from a clean slate).
+func (s *Server) handleClearWorklogs(w http.ResponseWriter, _ *http.Request) {
+	res, err := s.db.Exec(`DELETE FROM worklogs`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	n, _ := res.RowsAffected()
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
 
 // searchTerm pulls a free-text search term out of the request's JQL (from the
 // POST body or the ?jql= query param). Returns "" when the JQL has no `~`
