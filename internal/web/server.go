@@ -1099,13 +1099,32 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment); err != nil {
+	created, err := client.AddWorklog(wl.IssueKey, wl.Minutes, started, wl.Comment)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("submit row: %v", err))
 		return
 	}
 
+	// Determine the source label for the new existing worklog.
+	src := "real"
+	if s.activeWrite == "mock" {
+		src = "mock"
+	}
+
 	s.mu.Lock()
-	s.days[idx].Suggested[rowIdx].Submitted = true
+	// Move the submitted row into Existing and remove it from Suggested.
+	existingWL := WlogView{
+		ID:       created.ID,
+		IssueKey: wl.IssueKey,
+		Minutes:  wl.Minutes,
+		Comment:  wl.Comment,
+		Category: string(model.CategoryExisting),
+		Source:   src,
+	}
+	s.days[idx].Existing = append(s.days[idx].Existing, existingWL)
+	// Remove the row from Suggested (keep others intact).
+	sugg := s.days[idx].Suggested
+	s.days[idx].Suggested = append(sugg[:rowIdx], sugg[rowIdx+1:]...)
 	d := s.days[idx]
 	s.mu.Unlock()
 
@@ -2791,7 +2810,7 @@ async function submitRow(date, rowIdx) {
     if (i>=0) days[i] = res.day;
     renderDetail(res.day);
     renderList();
-    toast('Row submitted to '+res.target+'.');
+    toast('Logged to '+res.target+'.');
   } catch(e) { toast(e.message, true); }
 }
 
