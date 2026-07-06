@@ -2598,25 +2598,28 @@ function renderDetail(day) {
   // Existing worklogs — read-only by default; click ✏️ to edit time/comment.
   if (day.existing && day.existing.length) {
     html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
-    html += '<table><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
+    html += '<table><tr><th style="width:52px"></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
       const editing = editingExisting.has(w.id);
       html += '<tr class="cat-existing">';
-      // Delete
-      html += '<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>';
+      // Both buttons packed in one narrow first column
+      html += '<td style="white-space:nowrap;width:52px">'
+        +'<button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button>'
+        +(editing
+          ? '<button class="primary" style="font-size:.75rem;padding:2px 6px;margin-left:2px" onclick="saveExistingEdit(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\')">💾</button>'
+          : '<button style="font-size:.75rem;padding:2px 4px;margin-left:2px;background:transparent;border:none;cursor:pointer" title="Edit" onclick="toggleEditExisting(\''+w.id+'\')">✏️</button>')
+        +'</td>';
       // Key + title (always read-only)
       html += '<td><input type="text" id="'+eid+'" value="'+esc(w.issueKey)+'" readonly style="width:100%;background:transparent;border:none;font-weight:600;cursor:default" tabindex="-1"></td>';
       if (editing) {
         // Edit mode: time and comment are editable inputs
         html += '<td><input type="text" id="ex-time-'+w.id+'" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m"></td>';
         html += '<td><input type="text" id="ex-comment-'+w.id+'" value="'+esc(w.comment)+'" style="width:100%"></td>';
-        html += '<td><button class="primary" style="font-size:.75rem;padding:3px 10px;white-space:nowrap" onclick="saveExistingEdit(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\')">Save</button></td>';
       } else {
-        // View mode: plain text, no inputs
+        // View mode: plain text
         html += '<td style="white-space:nowrap">'+esc(hm(w.minutes))+'</td>';
         html += '<td>'+esc(w.comment)+'</td>';
-        html += '<td><button style="font-size:.75rem;padding:3px 8px;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;cursor:pointer" onclick="toggleEditExisting(\''+w.id+'\')">✏️</button></td>';
       }
       html += '</tr>';
     });
