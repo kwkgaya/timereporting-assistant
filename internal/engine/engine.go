@@ -105,7 +105,7 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		plan.Suggested = append(plan.Suggested, model.Worklog{
 			IssueKey: cfg.MeetingIssueKey,
 			Minutes:  meetingAlloc,
-			Comment:  fmt.Sprintf("Meetings (%s) [timereporting]", started.Format("2006-01-02")),
+			Comment:  fmt.Sprintf("Meetings (%s)", started.Format("2006-01-02")),
 			Category: model.CategoryMeeting,
 			Started:  started,
 		})
@@ -127,7 +127,7 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		plan.Suggested = append(plan.Suggested, model.Worklog{
 			IssueKey: cfg.LeaveIssueKey,
 			Minutes:  remaining,
-			Comment:  fmt.Sprintf("No activity found for %s — please review [timereporting]", started.Format("2006-01-02")),
+			Comment:  fmt.Sprintf("No activity found for %s — please review", started.Format("2006-01-02")),
 			Category: model.CategoryLeave,
 			Started:  started,
 		})
@@ -144,7 +144,7 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		plan.Suggested = append(plan.Suggested, model.Worklog{
 			IssueKey: g.Key,
 			Minutes:  allocs[i],
-			Comment:  fmt.Sprintf("%s [timereporting]", desc),
+			Comment:  desc,
 			Category: model.CategoryActivity,
 			Started:  started,
 		})

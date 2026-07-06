@@ -140,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/config", s.apiPutConfig)
 	mux.HandleFunc("POST /api/reload", s.apiReload)
 	mux.HandleFunc("GET /api/reload/stream", s.apiReloadStream)
+	mux.HandleFunc("GET /api/issue", s.apiGetIssue)
 	mux.HandleFunc("GET /api/credentials/status", s.apiCredentialStatus)
 	mux.HandleFunc("POST /api/credentials/jira", s.apiSetJiraCredentials)
 	mux.HandleFunc("POST /api/credentials/github", s.apiSetGitHubCredentials)
@@ -360,6 +361,41 @@ func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.
 		s.realClient = realClient
 	}
 	s.mu.Unlock()
+}
+
+// readClientLocked returns the Jira client used for reads, matching the source
+// the day plans were built from. Caller must hold s.mu.
+func (s *Server) readClientLocked() *jira.Client {
+	switch s.cfg.Target {
+	case config.TargetReal, config.TargetMockWrite:
+		if s.realClient != nil {
+			return s.realClient
+		}
+	}
+	return s.mockClient
+}
+
+// apiGetIssue returns a Jira issue's summary (title) for the given ?key=.
+// Used by the review UI to show the issue title next to its key.
+func (s *Server) apiGetIssue(w http.ResponseWriter, r *http.Request) {
+	key := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("key")))
+	if key == "" {
+		writeErr(w, http.StatusBadRequest, "key required")
+		return
+	}
+	s.mu.Lock()
+	client := s.readClientLocked()
+	s.mu.Unlock()
+	if client == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no Jira client available")
+		return
+	}
+	iss, err := client.GetIssue(key)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"key": iss.Key, "summary": iss.Summary})
 }
 
 func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
@@ -817,13 +853,11 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var submitted []WlogView
-	// Build a set of comment fingerprints already in existing worklogs (from this
-	// tool) so re-runs don't double-submit the same row.
+	// Build a set of fingerprints from worklogs already in Jira so re-runs don't
+	// double-submit the same row (matched by issue key + comment).
 	alreadyLogged := map[string]bool{}
 	for _, wl := range d.Existing {
-		if strings.Contains(wl.Comment, jira.WorklogMarker) {
-			alreadyLogged[wl.IssueKey+"|"+wl.Comment] = true
-		}
+		alreadyLogged[wl.IssueKey+"|"+wl.Comment] = true
 	}
 	for _, wl := range d.Suggested {
 		if wl.IssueKey == "" || wl.Minutes <= 0 {
@@ -1985,6 +2019,8 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .cat-leave{background:#fff8b5}
 .cat-manual{background:#f4f5f7}
 .row-unassigned{background:#fffae6}
+.issue-title{font-size:.75rem;color:#6b778c;margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sugg-total td{font-weight:700;border-top:2px solid #dfe1e6;background:#f4f5f7}
 .del-btn{background:none;border:none;cursor:pointer;color:#de350b;font-size:1rem;padding:0 4px}
 .summary{background:#fff;border:1px solid #dfe1e6;border-radius:4px;padding:12px 16px;margin-bottom:16px;font-size:.85rem}
 .summary span{font-weight:600}
@@ -2094,26 +2130,6 @@ function renderDetail(day) {
   }
   html += '</div>';
 
-  // Notes
-  if (day.notes && day.notes.length) {
-    html += '<div class="notes">ℹ️ '+day.notes.join(' | ')+'</div><br>';
-  }
-
-  // Unassigned activity + Revo prompt (#12)
-  if (day.unassigned && day.unassigned.length) {
-    html += '<details style="margin-bottom:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Revo</summary>';
-    html += '<div style="background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:10px 14px;margin-top:6px">';
-    html += '<table style="font-size:.82rem;width:100%;border-collapse:collapse;margin-bottom:8px">'
-      +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
-    day.unassigned.forEach(a => {
-      html += '<tr><td style="padding:3px 8px;color:#6b778c">'+esc(a.source)+'</td><td style="padding:3px 8px">'+esc(a.text)+'</td></tr>';
-    });
-    html += '</table>';
-    html += '<button class="secondary" style="font-size:.8rem" onclick="copyRevoPrompt(\''+day.date+'\')">📋 Copy Revo prompt</button>';
-    html += '<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Paste into Rovo AI in Jira to find the right task, then add rows above.</span>';
-    html += '</div></details>';
-  }
-
   // Existing worklogs (read-only)
   if (day.existing && day.existing.length) {
     html += '<strong>Already logged in Jira</strong>';
@@ -2131,24 +2147,54 @@ function renderDetail(day) {
 
   // Suggested worklogs (editable)
   html += '<strong>Suggested worklogs</strong>';
-  html += '<table id="sugg-table"><tr><th>Issue key</th><th>Time (min)</th><th>Comment</th><th></th><th></th></tr>';
+  html += '<table id="sugg-table"><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th><th></th></tr>';
   (day.suggested||[]).forEach((w,i) => {
     const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
     const submitted = w.submitted;
+    const tid = 'title-'+day.date+'-'+i;
     html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
-      +'<td><input type="text" value="'+esc(w.issueKey)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'issueKey\',this.value)"></td>'
-      +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'minutes\',+this.value)"></td>'
+      +'<td><input type="text" value="'+esc(w.issueKey)+'" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)">'
+        +'<div class="issue-title" id="'+tid+'"></div></td>'
+      +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
       +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
       +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
       +'<td>'+(submitted?'':' <button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
       +'</tr>';
   });
   if (!day.suggested || day.suggested.length===0) {
-    html += '<tr><td colspan="4" style="color:#6b778c;text-align:center">No suggestions yet — add a row or clone from the previous day.</td></tr>';
+    html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions yet — add a row or clone from the previous day.</td></tr>';
+  } else {
+    html += '<tr class="sugg-total"><td style="text-align:right">Total</td>'
+      +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
   }
   html += '</table>';
 
+  // Notes (below the suggested worklogs)
+  if (day.notes && day.notes.length) {
+    html += '<div class="notes" style="margin-top:14px">ℹ️ '+day.notes.join(' | ')+'</div>';
+  }
+
+  // Unassigned activity + Revo prompt (#12) — below the suggested worklogs
+  if (day.unassigned && day.unassigned.length) {
+    html += '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Revo</summary>';
+    html += '<div style="background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:10px 14px;margin-top:6px">';
+    html += '<table style="font-size:.82rem;width:100%;border-collapse:collapse;margin-bottom:8px">'
+      +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
+    day.unassigned.forEach(a => {
+      html += '<tr><td style="padding:3px 8px;color:#6b778c">'+esc(a.source)+'</td><td style="padding:3px 8px">'+esc(a.text)+'</td></tr>';
+    });
+    html += '</table>';
+    html += '<button class="secondary" style="font-size:.8rem" onclick="copyRevoPrompt(\''+day.date+'\')">📋 Copy Revo prompt</button>';
+    html += '<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Paste into Rovo AI in Jira to find the right task, then add rows above.</span>';
+    html += '</div></details>';
+  }
+
   el.innerHTML = html;
+
+  // Lazy-load issue titles for the suggested rows.
+  (day.suggested||[]).forEach((w,i) => {
+    if (w.issueKey) fetchIssueTitle(w.issueKey, 'title-'+day.date+'-'+i);
+  });
 }
 
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
@@ -2178,6 +2224,66 @@ function editRow(date, idx, field, value) {
   if (!day) return;
   day.suggested[idx][field] = value;
   saveSuggested(date, day.suggested);
+}
+
+// editRowKey updates the issue key and refreshes the displayed title.
+function editRowKey(date, idx, value) {
+  editRow(date, idx, 'issueKey', value);
+  fetchIssueTitle(value, 'title-'+date+'-'+idx);
+}
+
+// parseDuration converts a Jira-style duration (1h, 30m, 1h 30m) to minutes.
+// A bare number is treated as minutes. Returns NaN for unparseable input.
+function parseDuration(str) {
+  if (str == null) return 0;
+  str = (''+str).trim().toLowerCase();
+  if (str === '') return 0;
+  if (/^\d+$/.test(str)) return parseInt(str, 10);
+  let total = 0, matched = false;
+  const re = /(\d+(?:\.\d+)?)\s*([hm])/g;
+  let m;
+  while ((m = re.exec(str))) {
+    matched = true;
+    const v = parseFloat(m[1]);
+    total += m[2] === 'h' ? Math.round(v*60) : Math.round(v);
+  }
+  return matched ? total : NaN;
+}
+
+// editRowTime parses a Jira-format time entry and stores it as minutes.
+function editRowTime(date, idx, value) {
+  const mins = parseDuration(value);
+  const day = getDayLocal(date);
+  if (!day) return;
+  if (isNaN(mins) || mins < 0) {
+    toast('Enter time like 1h, 30m, or 1h 30m', true);
+    renderDetail(day);
+    return;
+  }
+  day.suggested[idx].minutes = mins;
+  saveSuggested(date, day.suggested);
+  renderDetail(day);
+  renderList();
+}
+
+// fetchIssueTitle looks up a Jira issue summary and shows it in the given element.
+const issueTitleCache = {};
+async function fetchIssueTitle(key, elId) {
+  const el = document.getElementById(elId);
+  if (!el || !key) return;
+  key = (''+key).trim().toUpperCase();
+  if (!key) { el.textContent = ''; return; }
+  if (issueTitleCache[key] !== undefined) { el.textContent = issueTitleCache[key]; return; }
+  try {
+    const r = await fetch('/api/issue?key='+encodeURIComponent(key));
+    if (r.ok) {
+      const d = await r.json();
+      issueTitleCache[key] = d.summary || '';
+    } else {
+      issueTitleCache[key] = '';
+    }
+  } catch (_) { issueTitleCache[key] = ''; }
+  el.textContent = issueTitleCache[key];
 }
 
 function deleteRow(date, idx) {
