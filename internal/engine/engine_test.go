@@ -162,7 +162,7 @@ func TestAllocateDirect(t *testing.T) {
 		// Directly test allocate via a re-implementation to avoid import cycle.
 		// We use the exported BuildDayPlan as an integration test instead.
 		acts := make([]model.Activity, 0)
-		keys := []string{"A-1", "B-2", "C-3", "D-4"}
+		keys := []string{"AA-1", "BB-2", "CC-3", "DD-4"}
 		for i, w := range tc.weights {
 			if i >= len(keys) {
 				break
@@ -172,8 +172,7 @@ func TestAllocateDirect(t *testing.T) {
 			}
 		}
 		plan := BuildDayPlan(
-			Config{WorkdayMinutes: tc.totalMins, MeetingIssueKey: "MTG-1", LeaveIssueKey: "LVE-1"},
-jun1, model.StatusWorking, nil, nil, acts,
+			Config{WorkdayMinutes: tc.totalMins, MeetingIssueKey: "MTG-1", LeaveIssueKey: "LVE-1"},jun1, model.StatusWorking, nil, nil, acts,
 		)
 		total := sumSuggested(plan)
 		if total != tc.totalMins {
