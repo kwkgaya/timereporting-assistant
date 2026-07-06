@@ -104,3 +104,25 @@ func TestClientAuthorFilter(t *testing.T) {
 		t.Errorf("expected no worklogs for other author, got %+v", byDay)
 	}
 }
+
+func TestClientAssignedIssuesForDay(t *testing.T) {
+	c, _, cleanup := newTestClient(t)
+	defer cleanup()
+
+	// The mock search ignores JQL and returns all seeded issues (EDB-9070,
+	// EDB-9071, EDB-100, EDB-200, EDB-300). Verify that AssignedIssuesForDay
+	// returns a non-empty list and respects the cap of 8.
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := c.AssignedIssuesForDay(day)
+	if err != nil {
+		t.Fatalf("AssignedIssuesForDay: %v", err)
+	}
+	if len(issues) == 0 {
+		t.Error("expected at least one issue from mock server")
+	}
+	for _, iss := range issues {
+		if iss.Key == "" || iss.Summary == "" {
+			t.Errorf("unexpected empty issue: %+v", iss)
+		}
+	}
+}

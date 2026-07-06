@@ -223,6 +223,27 @@ func (c *Client) SearchIssues(jql string) ([]Issue, error) {
 	return out, nil
 }
 
+// AssignedIssuesForDay returns open issues assigned to the user that were
+// updated on the given day. It is used as a fallback when no git/GitHub
+// activity is detected, so the engine can suggest logging to the tasks the
+// user was actively working on.
+func (c *Client) AssignedIssuesForDay(day time.Time) ([]Issue, error) {
+	d := day.UTC().Format("2006-01-02")
+	next := day.UTC().AddDate(0, 0, 1).Format("2006-01-02")
+	jql := fmt.Sprintf(
+		`assignee = currentUser() AND updated >= "%s" AND updated < "%s" AND statusCategory != Done ORDER BY updated DESC`,
+		d, next,
+	)
+	issues, err := c.SearchIssues(jql)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) > 8 {
+		issues = issues[:8] // cap to avoid noisy suggestions
+	}
+	return issues, nil
+}
+
 // ListWorklogs returns all worklogs on an issue as model.Worklog values
 // (Category = existing).
 func (c *Client) ListWorklogs(key string) ([]model.Worklog, error) {

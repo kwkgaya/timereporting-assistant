@@ -227,7 +227,19 @@ func runMain() {
 				ga, _ := ghc.CollectForDay(day)
 				acts = append(acts, ga...)
 			}
-			ps = append(ps, engine.BuildDayPlan(ec, day, status, ex, mm, acts))
+			// Fallback: if no code activity detected, suggest based on Jira assignments.
+			jiraFallback := false
+			if len(acts) == 0 && status == model.StatusWorking && rc != mb {
+				if issues, err := rc.AssignedIssuesForDay(day); err == nil && len(issues) > 0 {
+					acts = jiraAssignedActivities(day, issues)
+					jiraFallback = true
+				}
+			}
+			plan := engine.BuildDayPlan(ec, day, status, ex, mm, acts)
+			if jiraFallback {
+				plan.Notes = append(plan.Notes, "no code activity detected — suggestions based on Jira issue assignments")
+			}
+			ps = append(ps, plan)
 		}
 		report(total, total, "Finalizing…")
 		return ps, mb, rb, nil
@@ -341,7 +353,19 @@ func runMain() {
 			ga, _ := ghc.CollectForDay(day)
 			acts = append(acts, ga...)
 		}
-		return engine.BuildDayPlan(ec, day, dayStatus, ex, mm, acts), nil
+		// Fallback: if no code activity detected, suggest based on Jira assignments.
+		jiraFallback := false
+		if len(acts) == 0 && dayStatus == model.StatusWorking && rc != mb {
+			if issues, err := rc.AssignedIssuesForDay(day); err == nil && len(issues) > 0 {
+				acts = jiraAssignedActivities(day, issues)
+				jiraFallback = true
+			}
+		}
+		plan := engine.BuildDayPlan(ec, day, dayStatus, ex, mm, acts)
+		if jiraFallback {
+			plan.Notes = append(plan.Notes, "no code activity detected — suggestions based on Jira issue assignments")
+		}
+		return plan, nil
 	}
 
 	// ── Web review UI ──────────────────────────────────────────────────────
@@ -480,4 +504,19 @@ func appDataDir() string {
 		return filepath.Join(home, ".config", "timereporting-assistant")
 	}
 	return "."
+}
+
+// jiraAssignedActivities converts Jira issues into synthetic Activity values
+// so the engine can distribute time across them when no code activity is found.
+func jiraAssignedActivities(day time.Time, issues []jira.Issue) []model.Activity {
+	acts := make([]model.Activity, 0, len(issues))
+	for _, iss := range issues {
+		acts = append(acts, model.Activity{
+			Date:   day,
+			Source: "jira-assigned",
+			Text:   iss.Summary,
+			Keys:   []string{iss.Key},
+		})
+	}
+	return acts
 }
