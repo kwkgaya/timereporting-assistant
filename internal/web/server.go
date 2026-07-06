@@ -2523,22 +2523,30 @@ function renderDetail(day) {
   }
   html += '</div>';
 
-  // Existing worklogs — issue key is read-only; time (Jira format) and comment are editable.
+  // Existing worklogs — read-only by default; click ✏️ to edit time/comment.
   if (day.existing && day.existing.length) {
     html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
-    html += '<table><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
+    html += '<table><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
-      html += '<tr class="cat-existing">'
-        // Delete first
-        +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
-        // Key + title in a readonly input (fetchIssueTitle fills in the title)
-        +'<td><input type="text" id="'+eid+'" value="'+esc(w.issueKey)+'" readonly style="width:100%;background:transparent;border:none;font-weight:600;cursor:default" tabindex="-1"></td>'
-        // Time: Jira-format text input
-        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')">'+'</td>'
-        // Comment: plain text input
-        +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
-        +'</tr>';
+      const editing = editingExisting.has(w.id);
+      html += '<tr class="cat-existing">';
+      // Delete
+      html += '<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>';
+      // Key + title (always read-only)
+      html += '<td><input type="text" id="'+eid+'" value="'+esc(w.issueKey)+'" readonly style="width:100%;background:transparent;border:none;font-weight:600;cursor:default" tabindex="-1"></td>';
+      if (editing) {
+        // Edit mode: time and comment are editable inputs
+        html += '<td><input type="text" id="ex-time-'+w.id+'" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m"></td>';
+        html += '<td><input type="text" id="ex-comment-'+w.id+'" value="'+esc(w.comment)+'" style="width:100%"></td>';
+        html += '<td><button class="primary" style="font-size:.75rem;padding:3px 10px;white-space:nowrap" onclick="saveExistingEdit(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\')">Save</button></td>';
+      } else {
+        // View mode: plain text, no inputs
+        html += '<td style="white-space:nowrap">'+esc(hm(w.minutes))+'</td>';
+        html += '<td>'+esc(w.comment)+'</td>';
+        html += '<td><button style="font-size:.75rem;padding:3px 8px;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;cursor:pointer" onclick="toggleEditExisting(\''+w.id+'\')">✏️</button></td>';
+      }
+      html += '</tr>';
     });
     html += '</table>';
     // Lazy-load issue titles for existing rows.
@@ -2824,6 +2832,29 @@ function copyRevoPrompt(date) {
       window.prompt('Copy this prompt and paste into Rovo AI in Jira:', text);
     }
   );
+}
+
+// editingExisting tracks which existing-worklog IDs are currently in edit mode.
+const editingExisting = new Set();
+
+function toggleEditExisting(id) {
+  if (editingExisting.has(id)) {
+    editingExisting.delete(id);
+  } else {
+    editingExisting.add(id);
+  }
+  const day = getDayLocal(currentDate);
+  if (day) renderDetail(day);
+}
+
+async function saveExistingEdit(date, id, issueKey) {
+  const timeEl = document.getElementById('ex-time-'+id);
+  const commentEl = document.getElementById('ex-comment-'+id);
+  if (!timeEl || !commentEl) return;
+  const mins = parseDuration(timeEl.value);
+  if (isNaN(mins) || mins <= 0) { toast('Enter time like 1h, 30m, or 1h 30m', true); return; }
+  await updateExisting(date, id, issueKey, mins, commentEl.value);
+  editingExisting.delete(id);
 }
 
 // updateExistingTime parses a Jira-format time string then delegates to updateExisting.
