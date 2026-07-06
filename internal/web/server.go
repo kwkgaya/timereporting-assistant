@@ -52,8 +52,13 @@ type WlogView struct {
 
 // PlanBuilder is a function that builds a fresh set of day plans from the
 // current config. It is called at startup and again whenever the user triggers
-// a reload from the settings page.
-type PlanBuilder func(cfg config.Config) ([]model.DayPlan, *jira.Client, *jira.Client, error)
+// a reload from the settings page. The optional progress callback (may be nil)
+// receives incremental status updates while plans are built.
+type PlanBuilder func(cfg config.Config, progress ProgressFunc) ([]model.DayPlan, *jira.Client, *jira.Client, error)
+
+// ProgressFunc reports plan-building progress. done and total are day counts
+// (total may be 0 for phase-only messages); phase is a human-readable status.
+type ProgressFunc func(done, total int, phase string)
 
 // Server holds the state for the web review session.
 type Server struct {
@@ -134,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.apiGetConfig)
 	mux.HandleFunc("PUT /api/config", s.apiPutConfig)
 	mux.HandleFunc("POST /api/reload", s.apiReload)
+	mux.HandleFunc("GET /api/reload/stream", s.apiReloadStream)
 	mux.HandleFunc("GET /api/credentials/status", s.apiCredentialStatus)
 	mux.HandleFunc("POST /api/credentials/jira", s.apiSetJiraCredentials)
 	mux.HandleFunc("POST /api/credentials/github", s.apiSetGitHubCredentials)
@@ -282,13 +288,59 @@ func (s *Server) apiReload(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	plans, mockClient, realClient, err := builder(cfg)
+	plans, mockClient, realClient, err := builder(cfg, nil)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "rebuild plans: "+err.Error())
 		return
 	}
+	s.applyPlans(plans, mockClient, realClient)
+	writeJSON(w, http.StatusOK, map[string]any{"rebuilt": len(plans), "status": "ok"})
+}
 
-	// Rebuild the day index with the new plans.
+// apiReloadStream rebuilds the day plans while streaming progress to the client
+// via Server-Sent Events. It emits "progress" events ({done,total,phase}) and a
+// final "done" event ({rebuilt}) or an "error" event.
+func (s *Server) apiReloadStream(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	builder := s.planBuilder
+	cfg := s.cfg
+	s.mu.Unlock()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	send := func(event string, payload any) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		flusher.Flush()
+	}
+
+	if builder == nil {
+		send("error", map[string]string{"error": "plan builder not configured; restart the app"})
+		return
+	}
+
+	progress := func(done, total int, phase string) {
+		send("progress", map[string]any{"done": done, "total": total, "phase": phase})
+	}
+
+	plans, mockClient, realClient, err := builder(cfg, progress)
+	if err != nil {
+		send("error", map[string]string{"error": err.Error()})
+		return
+	}
+	s.applyPlans(plans, mockClient, realClient)
+	send("done", map[string]any{"rebuilt": len(plans)})
+}
+
+// applyPlans swaps in a freshly built set of day plans and updates the clients.
+func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.Client) {
 	newDays := make([]DayView, 0, len(plans))
 	newIndex := map[string]int{}
 	for _, p := range plans {
@@ -308,8 +360,6 @@ func (s *Server) apiReload(w http.ResponseWriter, _ *http.Request) {
 		s.realClient = realClient
 	}
 	s.mu.Unlock()
-
-	writeJSON(w, http.StatusOK, map[string]any{"rebuilt": len(plans), "status": "ok"})
 }
 
 func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
@@ -1209,6 +1259,8 @@ button{font:inherit;border-radius:4px;padding:9px 20px;cursor:pointer;font-size:
 .checklist li{padding:5px 0;font-size:.9rem;color:#42526e}
 .checklist li::before{content:"✓ ";color:#00875a;font-weight:700}
 .done-icon{font-size:3rem;text-align:center;margin-bottom:12px}
+.build-bar{background:#e9f2ff;height:10px;border-radius:5px;overflow:hidden;margin-top:8px}
+.build-fill{background:#0052cc;height:10px;width:0;transition:width .3s}
 a{color:#0052cc}
 </style></head>
 <body>
@@ -1341,11 +1393,20 @@ a{color:#0052cc}
 
 <div class="card" id="step-6" style="display:none">
   <div class="step-label">Step 6 of 6</div>
-  <div class="done-icon">🎉</div>
-  <h2 style="text-align:center">You're all set!</h2>
-  <p class="subtitle" style="text-align:center" id="done-msg">Building your time report plans…</p>
-  <div class="btn-row" style="justify-content:center;margin-top:16px">
-    <button class="btn-primary" id="btn-go" onclick="window.location='/'" disabled>Open time report →</button>
+  <div id="build-view">
+    <div class="done-icon">⏳</div>
+    <h2 style="text-align:center">Building your time report plans…</h2>
+    <p class="subtitle" style="text-align:center;margin-bottom:8px" id="build-phase">Starting…</p>
+    <div class="build-bar"><div class="build-fill" id="build-fill"></div></div>
+    <p style="text-align:center;font-size:.82rem;color:#6b778c;margin-top:8px" id="build-count"></p>
+  </div>
+  <div id="done-view" style="display:none">
+    <div class="done-icon">🎉</div>
+    <h2 style="text-align:center">You're all set!</h2>
+    <p class="subtitle" style="text-align:center" id="done-msg"></p>
+    <div class="btn-row" style="justify-content:center;margin-top:16px">
+      <button class="btn-primary" id="btn-go" onclick="window.location='/'">Open time report →</button>
+    </div>
   </div>
 </div>
 
@@ -1422,6 +1483,11 @@ async function saveReposAndFinish(){
   const authors=document.getElementById('w-authors').value.split(',').map(s=>s.trim()).filter(Boolean);
   const ics=document.getElementById('w-ics').value.trim();
   goTo(6);
+  document.getElementById('build-view').style.display='block';
+  document.getElementById('done-view').style.display='none';
+  document.getElementById('build-fill').style.width='0%';
+  document.getElementById('build-phase').textContent='Saving configuration…';
+  document.getElementById('build-count').textContent='';
   try{
     await api('PUT','/config',{
       localRepos:repos, gitAuthors:authors, icsPath:ics,
@@ -1429,13 +1495,46 @@ async function saveReposAndFinish(){
       webPort:+(document.getElementById('w-webPort').value||9080),
       mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
     });
-    const res=await api('POST','/reload');
-    document.getElementById('done-msg').textContent='Plans built for '+res.rebuilt+' days. You\'re ready!';
-    document.getElementById('btn-go').disabled=false;
-  }catch(e){
-    document.getElementById('done-msg').textContent='⚠ '+e.message+' — you can still continue.';
-    document.getElementById('btn-go').disabled=false;
-  }
+  }catch(e){ showBuildError(e.message); return; }
+  startBuildStream();
+}
+function showBuildError(msg){
+  document.getElementById('build-view').style.display='none';
+  const dv=document.getElementById('done-view');
+  dv.style.display='block';
+  dv.querySelector('.done-icon').textContent='⚠';
+  document.getElementById('done-msg').textContent=msg+' — you can still continue.';
+}
+function startBuildStream(){
+  let finished=false;
+  const es=new EventSource('/api/reload/stream');
+  es.addEventListener('progress',ev=>{
+    const d=JSON.parse(ev.data);
+    document.getElementById('build-phase').textContent=d.phase||'Working…';
+    if(d.total>0){
+      const pct=Math.round((d.done/d.total)*100);
+      document.getElementById('build-fill').style.width=pct+'%';
+      document.getElementById('build-count').textContent=d.done+' / '+d.total+' days';
+    }
+  });
+  es.addEventListener('done',ev=>{
+    finished=true; es.close();
+    const d=JSON.parse(ev.data);
+    document.getElementById('build-fill').style.width='100%';
+    document.getElementById('build-view').style.display='none';
+    document.getElementById('done-view').style.display='block';
+    document.getElementById('done-msg').textContent='Plans built for '+d.rebuilt+' days. You\'re ready!';
+  });
+  es.addEventListener('error',ev=>{
+    if(finished)return;
+    // A custom server error event carries data; transient connection blips do not.
+    if(ev.data){
+      finished=true; es.close();
+      let msg='Could not build plans';
+      try{ msg=JSON.parse(ev.data).error||msg; }catch(_){}
+      showBuildError(msg);
+    }
+  });
 }
 async function uploadICS(input, targetId) {
   if (!input.files || !input.files[0]) return;

@@ -176,7 +176,13 @@ func runMain() {
 	_ = readClient // readClient is now handled inside buildPlans
 
 	// ── Build day plans (also used by the /api/reload endpoint) ──────────────
-	buildPlans := func(c config.Config) ([]model.DayPlan, *jira.Client, *jira.Client, error) {
+	buildPlans := func(c config.Config, progress web.ProgressFunc) ([]model.DayPlan, *jira.Client, *jira.Client, error) {
+		report := func(done, total int, phase string) {
+			if progress != nil {
+				progress(done, total, phase)
+			}
+		}
+		total := len(days)
 		mb := jira.NewClient(fmt.Sprintf("http://localhost:%d", c.MockJiraPort), "", "")
 		var rb *jira.Client
 		if c.Jira.BaseURL != "" && c.JiraAPIToken != "" {
@@ -192,6 +198,7 @@ func runMain() {
 			rc = mb
 		}
 
+		report(0, total, "Reading existing worklogs…")
 		existing, _ := rc.ExistingWorklogsByDay(c.Jira.Email, startDate, endDate)
 		if existing == nil {
 			existing = map[string][]model.Worklog{}
@@ -199,6 +206,7 @@ func runMain() {
 
 		var meetings []model.Meeting
 		if c.ICSPath != "" {
+			report(0, total, "Reading calendar…")
 			meetings, _ = ics.ParseFile(c.ICSPath)
 		}
 
@@ -210,8 +218,9 @@ func runMain() {
 
 		ec := engine.DefaultConfig(c.WorkdayHours, c.MeetingIssueKey, c.LeaveIssueKey)
 		var ps []model.DayPlan
-		for _, day := range days {
+		for i, day := range days {
 			dk := day.Format("2006-01-02")
+			report(i, total, "Scanning activity for "+dk+"…")
 			ex := existing[dk]
 			mm := ics.TotalMinutesForDay(meetings, day)
 			var acts []model.Activity
@@ -223,10 +232,11 @@ func runMain() {
 			}
 			ps = append(ps, engine.BuildDayPlan(ec, day, model.StatusWorking, ex, mm, acts))
 		}
+		report(total, total, "Finalizing…")
 		return ps, mb, rb, nil
 	}
 
-	plans, mockClient, realClient, _ := buildPlans(cfg)
+	plans, mockClient, realClient, _ := buildPlans(cfg, nil)
 
 	// ── Web review UI ──────────────────────────────────────────────────────
 	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
