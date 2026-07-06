@@ -10,6 +10,45 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/adf"
 )
 
+func TestSearchFiltersByTerm(t *testing.T) {
+	srv := NewDefault()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	search := func(jql string) []string {
+		body, _ := json.Marshal(map[string]any{"jql": jql})
+		resp, err := http.Post(ts.URL+"/rest/api/3/search/jql", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out struct {
+			Issues []struct {
+				Key string `json:"key"`
+			} `json:"issues"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		keys := make([]string, 0, len(out.Issues))
+		for _, i := range out.Issues {
+			keys = append(keys, i.Key)
+		}
+		return keys
+	}
+
+	// A ~ term filters by summary substring.
+	if got := search(`text ~ "login*"`); len(got) != 1 || got[0] != "EDB-200" {
+		t.Errorf("search login = %v, want [EDB-200]", got)
+	}
+	// Matching by key substring.
+	if got := search(`text ~ "EDB-100*"`); len(got) != 1 || got[0] != "EDB-100" {
+		t.Errorf("search EDB-100 = %v, want [EDB-100]", got)
+	}
+	// A JQL with no ~ clause (the worklogAuthor query) returns all issues.
+	if got := search(`worklogAuthor = currentUser()`); len(got) != 5 {
+		t.Errorf("worklogAuthor query returned %d issues, want 5 (all)", len(got))
+	}
+}
+
 func TestAddAndListWorklog(t *testing.T) {
 	srv := NewDefault()
 	ts := httptest.NewServer(srv.Handler())

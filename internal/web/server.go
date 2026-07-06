@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -141,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/reload", s.apiReload)
 	mux.HandleFunc("GET /api/reload/stream", s.apiReloadStream)
 	mux.HandleFunc("GET /api/issue", s.apiGetIssue)
+	mux.HandleFunc("GET /api/issues/search", s.apiSearchIssues)
 	mux.HandleFunc("GET /api/credentials/status", s.apiCredentialStatus)
 	mux.HandleFunc("POST /api/credentials/jira", s.apiSetJiraCredentials)
 	mux.HandleFunc("POST /api/credentials/github", s.apiSetGitHubCredentials)
@@ -396,6 +398,42 @@ func (s *Server) apiGetIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"key": iss.Key, "summary": iss.Summary})
+}
+
+// jqlSafe keeps only characters safe to embed inside a JQL string literal,
+// preventing JQL injection from the free-text search box.
+var jqlSafe = regexp.MustCompile(`[^A-Za-z0-9 _-]+`)
+
+// apiSearchIssues returns up to 10 Jira issues matching the ?q= text, for the
+// type-ahead issue picker in the review UI.
+func (s *Server) apiSearchIssues(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	s.mu.Lock()
+	client := s.readClientLocked()
+	s.mu.Unlock()
+	if client == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	safe := jqlSafe.ReplaceAllString(q, " ")
+	jql := fmt.Sprintf(`text ~ "%s*" ORDER BY updated DESC`, strings.TrimSpace(safe))
+	issues, err := client.SearchIssues(jql)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	out := make([]map[string]string, 0, 10)
+	for _, iss := range issues {
+		out = append(out, map[string]string{"key": iss.Key, "summary": iss.Summary})
+		if len(out) >= 10 {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) apiCredentialStatus(w http.ResponseWriter, _ *http.Request) {
@@ -2018,6 +2056,13 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .row-unassigned{background:#fffae6}
 .issue-title{font-size:.75rem;color:#6b778c;margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sugg-total td{font-weight:700;border-top:2px solid #dfe1e6;background:#f4f5f7}
+.new-row td{position:relative}
+.new-row input{border:1px dashed #0052cc;background:#f7faff}
+.issue-search-results{position:absolute;left:0;top:100%;z-index:20;background:#fff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:260px;overflow-y:auto;min-width:340px;display:none}
+.isr-item{padding:7px 12px;cursor:pointer;font-size:.85rem;border-bottom:1px solid #f0f1f3}
+.isr-item:hover{background:#e9f2ff}
+.isr-item strong{color:#0052cc;margin-right:6px}
+.isr-empty{padding:8px 12px;color:#6b778c;font-size:.82rem}
 .del-btn{background:none;border:none;cursor:pointer;color:#de350b;font-size:1rem;padding:0 4px}
 .summary{background:#fff;border:1px solid #dfe1e6;border-radius:4px;padding:12px 16px;margin-bottom:16px;font-size:.85rem}
 .summary span{font-weight:600}
@@ -2148,10 +2193,7 @@ function renderDetail(day) {
       ).join('')
     +'</select></label>';
   if (!day.submitted) {
-    html += '<button onclick="addRow(\''+day.date+'\')">+ Add row</button>';
     html += '<button onclick="clonePrev(\''+day.date+'\')">Clone previous day</button>';
-    html += '<button class="primary" onclick="submitDay(\''+day.date+'\',false)">Approve &amp; submit</button>';
-    html += '<button onclick="submitDay(\''+day.date+'\',true)">Dry run</button>';
   }
   html += '</div>';
 
@@ -2187,8 +2229,19 @@ function renderDetail(day) {
       +'</tr>';
   });
   if (!day.suggested || day.suggested.length===0) {
-    html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions yet — add a row or clone from the previous day.</td></tr>';
-  } else {
+    if (day.submitted) {
+      html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions.</td></tr>';
+    }
+  }
+  if (!day.submitted) {
+    // Always-visible entry row: the issue-key box searches Jira as you type.
+    html += '<tr class="new-row"><td>'
+      +'<input type="text" id="new-issue-input" placeholder="+ Type to search Jira issues…" autocomplete="off" '
+        +'oninput="onIssueSearchInput(this.value)" onkeydown="onNewRowKey(event,this)" onblur="setTimeout(hideIssueResults,200)">'
+      +'<div class="issue-search-results" id="issue-search-results"></div></td>'
+      +'<td colspan="4" style="color:#6b778c;font-size:.8rem">Pick an issue, or type a key &amp; press Enter, to add a row</td></tr>';
+  }
+  if (day.suggested && day.suggested.length) {
     html += '<tr class="sugg-total"><td style="text-align:right">Total</td>'
       +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
   }
@@ -2198,6 +2251,14 @@ function renderDetail(day) {
   html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
     +' &bull; Suggested: '+hm(suggMins)
     +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
+
+  // Submit actions — below the suggested worklogs.
+  if (!day.submitted) {
+    html += '<div class="controls" style="margin-bottom:16px">'
+      +'<button class="primary" onclick="submitDay(\''+day.date+'\',false)">Approve &amp; submit</button>'
+      +'<button onclick="submitDay(\''+day.date+'\',true)">Dry run</button>'
+      +'</div>';
+  }
 
   // Notes (below the suggested worklogs)
   if (day.notes && day.notes.length) {
@@ -2325,13 +2386,61 @@ function deleteRow(date, idx) {
   renderList();
 }
 
-function addRow(date) {
-  const day = getDayLocal(date);
+// addRowWithKey appends a new suggested row for the given issue key.
+function addRowWithKey(key) {
+  key = (''+key).trim().toUpperCase();
+  if (!key) return;
+  const day = getDayLocal(currentDate);
   if (!day) return;
   day.suggested = day.suggested || [];
-  day.suggested.push({issueKey:'',minutes:30,comment:'',category:'manual'});
+  day.suggested.push({issueKey:key, minutes:30, comment:'', category:'manual'});
+  saveSuggested(currentDate, day.suggested);
   renderDetail(day);
   renderList();
+}
+
+function hideIssueResults() {
+  const box = document.getElementById('issue-search-results');
+  if (box) { box.style.display='none'; box.innerHTML=''; }
+}
+
+let issueSearchTimer = null;
+// onIssueSearchInput queries Jira for issues matching the typed text and shows
+// a dropdown of results.
+function onIssueSearchInput(q) {
+  clearTimeout(issueSearchTimer);
+  const box = document.getElementById('issue-search-results');
+  if (!box) return;
+  q = (q||'').trim();
+  if (q.length < 2) { hideIssueResults(); return; }
+  issueSearchTimer = setTimeout(async () => {
+    try {
+      const res = await api('GET','/issues/search?q='+encodeURIComponent(q));
+      if (!res.length) {
+        box.innerHTML = '<div class="isr-empty">No matching issues</div>';
+      } else {
+        box.innerHTML = res.map(it =>
+          '<div class="isr-item" onmousedown="pickIssue(\''+it.key+'\')"><strong>'+esc(it.key)+'</strong> '+esc(it.summary)+'</div>'
+        ).join('');
+      }
+      box.style.display = 'block';
+    } catch(e) { hideIssueResults(); }
+  }, 250);
+}
+
+function pickIssue(key) {
+  hideIssueResults();
+  addRowWithKey(key);
+}
+
+function onNewRowKey(ev, input) {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    const v = input.value.trim();
+    if (v) addRowWithKey(v);
+  } else if (ev.key === 'Escape') {
+    hideIssueResults();
+  }
 }
 
 async function saveSuggested(date, suggested) {

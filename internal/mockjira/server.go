@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -289,8 +290,16 @@ func (s *Server) handleDeleteWorklog(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleSearch(w http.ResponseWriter, _ *http.Request) {
-	rows, err := s.db.Query(`SELECT key,summary FROM issues ORDER BY key`)
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	term := searchTerm(r)
+	query := `SELECT key,summary FROM issues ORDER BY key`
+	var args []any
+	if term != "" {
+		query = `SELECT key,summary FROM issues WHERE key LIKE ? OR summary LIKE ? ORDER BY key`
+		like := "%" + term + "%"
+		args = []any{like, like}
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -310,6 +319,30 @@ func (s *Server) handleSearch(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"startAt": 0, "maxResults": len(issues), "total": len(issues), "issues": issues,
 	})
+}
+
+// tildeRe extracts the term from a JQL clause like `text ~ "foo*"`.
+var tildeRe = regexp.MustCompile(`~\s*"([^"]*)"`)
+
+// searchTerm pulls a free-text search term out of the request's JQL (from the
+// POST body or the ?jql= query param). Returns "" when the JQL has no `~`
+// clause (e.g. the worklogAuthor query), so those callers still get all issues.
+func searchTerm(r *http.Request) string {
+	var jql string
+	if r.Method == http.MethodPost && r.Body != nil {
+		var body struct {
+			JQL string `json:"jql"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		jql = body.JQL
+	} else {
+		jql = r.URL.Query().Get("jql")
+	}
+	m := tildeRe.FindStringSubmatch(jql)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimRight(m[1], "*")
 }
 
 // ── Inspect UI ───────────────────────────────────────────────────────────────
