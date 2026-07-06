@@ -256,13 +256,13 @@ func countExistingForKey(existing []model.Worklog, key string) int {
 func leaveComment(status model.DayStatus) string {
 	switch status {
 	case model.StatusHoliday:
-		return "Public holiday [timereporting]"
+		return "Public holiday"
 	case model.StatusFullLeave:
-		return "Full-day leave [timereporting]"
+		return "Full-day leave"
 	case model.StatusHalfLeave:
-		return "Half-day leave [timereporting]"
+		return "Half-day leave"
 	default:
-		return "Leave [timereporting]"
+		return "Leave"
 	}
 }
 
