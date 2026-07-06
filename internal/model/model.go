@@ -42,6 +42,7 @@ type Activity struct {
 	Source string    // e.g. "github-commit", "github-pr", "github-review", "local-git"
 	Text   string    // human-readable description (commit subject, PR title, ...)
 	Ref    string    // repo/branch/URL reference
+	Hash   string    // short commit hash (for local-git activities; empty for GitHub)
 	Keys   []string  // Jira keys extracted from Text/Ref (may be empty)
 }
 

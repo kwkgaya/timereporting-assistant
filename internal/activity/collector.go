@@ -310,6 +310,7 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 			Source: SourceLocalGit,
 			Text:   subject,
 			Ref:    strings.TrimSpace(ref),
+			Hash:   fullHash[:min(7, len(fullHash))],
 		})
 	}
 	return acts, newHashes, nil
@@ -378,6 +379,7 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 			Source: SourceLocalGitReflog,
 			Text:   subject,
 			Ref:    ref,
+			Hash:   fullHash[:min(7, len(fullHash))],
 		})
 	}
 	return acts, nil
