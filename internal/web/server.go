@@ -2424,26 +2424,26 @@ function renderDetail(day) {
   }
   html += '</div>';
 
-  // Existing worklogs (read-only)
+  // Existing worklogs — issue key is read-only; time (Jira format) and comment are editable.
   if (day.existing && day.existing.length) {
-    const hasReal = day.existing.some(w=>w.source==='real');
-    const hasMock = day.existing.some(w=>w.source==='mock');
-    let legend = '';
-    if (hasReal) legend += '<span class="src-real-badge">✓ Jira</span>';
-    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock</span>';
-    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock</span>';
-    html += '<strong>Already logged in Jira</strong>'+legend;
-    html += '<table><tr><th>Issue</th><th>Time</th><th>Comment</th><th></th></tr>';
+    html += '<strong>Already logged in Jira</strong>';
+    html += '<table><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
-      const srcCls = w.source==='real'?'src-real':w.source==='mock'?'src-mock':'';
-      html += '<tr class="cat-existing'+( srcCls?' '+srcCls:'')+'">'
-        +'<td>'+w.issueKey+'</td>'
-        +'<td><input type="number" min="30" step="30" value="'+w.minutes+'" style="width:60px" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',+this.value,\''+esc(w.comment)+'\')" title="Edit minutes"></td>'
+      const eid = 'ex-key-'+day.date+'-'+w.id;
+      html += '<tr class="cat-existing">'
+        // Key: plain text + lazy title, not editable
+        +'<td><span style="font-weight:600">'+esc(w.issueKey)+'</span>'
+          +'<div class="issue-title" id="'+eid+'"></div></td>'
+        // Time: Jira-format text input
+        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')"></td>'
+        // Comment: plain text input
         +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
         +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
         +'</tr>';
     });
     html += '</table>';
+    // Lazy-load issue titles for existing rows.
+    setTimeout(()=>{day.existing.forEach(w=>{ if(w.issueKey) fetchIssueTitle(w.issueKey,'ex-key-'+day.date+'-'+w.id); });},0);
   }
 
   // Suggested worklogs (editable)
@@ -2717,8 +2717,14 @@ function copyRevoPrompt(date) {
   );
 }
 
-async function updateExisting(date, id, issueKey, minutes, comment) {
-  try {
+// updateExistingTime parses a Jira-format time string then delegates to updateExisting.
+function updateExistingTime(date, id, issueKey, timeStr, comment) {
+  const mins = parseDuration(timeStr);
+  if (isNaN(mins) || mins <= 0) { toast('Enter time like 1h, 30m, or 1h 30m', true); return; }
+  updateExisting(date, id, issueKey, mins, comment);
+}
+
+async function updateExisting(date, id, issueKey, minutes, comment) {  try {
     const updated = await api('PUT','/days/'+date+'/existing/'+id,{issueKey, minutes, comment});
     const i = days.findIndex(d=>d.date===date);
     if (i>=0) days[i] = updated;
