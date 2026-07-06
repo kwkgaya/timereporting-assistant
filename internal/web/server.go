@@ -2467,6 +2467,19 @@ function gotoIncomplete(dir) {
   toast(dir>0 ? 'No more incomplete days ahead.' : 'No earlier incomplete days.');
 }
 
+// gotoDay moves to the adjacent day (dir = +1 next, -1 previous).
+function gotoDay(dir) {
+  if (!days.length) return;
+  let i = days.findIndex(d=>d.date===currentDate);
+  if (i < 0) i = 0;
+  const j = i + dir;
+  if (j < 0 || j >= days.length) {
+    toast(dir>0 ? 'No more days ahead.' : 'No earlier days.');
+    return;
+  }
+  selectDay(days[j].date);
+}
+
 function renderDetail(day) {
   const el = document.getElementById('detail');
   const existMins = (day.existing||[]).reduce((a,w)=>a+w.minutes,0);
@@ -2475,10 +2488,10 @@ function renderDetail(day) {
   const totalCls = total>=420?'total-ok':'total-warn';
 
   let html = '<div class="day-nav">'
-    +'<button class="nav-btn" onclick="gotoIncomplete(-1)" title="Previous incomplete day">‹</button>'
+    +'<button class="nav-btn" onclick="gotoDay(-1)" title="Previous day">‹</button>'
     +'<h2>'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
     +(day.submitted?' <span class="badge-submitted">Submitted</span>':'')+'</h2>'
-    +'<button class="nav-btn" onclick="gotoIncomplete(1)" title="Next incomplete day">›</button>'
+    +'<button class="nav-btn" onclick="gotoDay(1)" title="Next day">›</button>'
     +'</div>';
 
   // Controls
@@ -2895,6 +2908,38 @@ async function setWriteTarget(target) {
   await onTargetCheckbox(checked);
 }
 
+// buildIncompleteDaysInBackground fetches the full plan for every stub day
+// that is incomplete (real Jira < 7h). Days already at or above target are
+// skipped — there is nothing to build or suggest for them.
+// Runs sequentially with a small pause between requests to avoid hammering
+// the server while the user is working.
+let _bgBuildRunning = false;
+async function buildIncompleteDaysInBackground() {
+  if (_bgBuildRunning) return;
+  _bgBuildRunning = true;
+  try {
+    for (const d of [...days]) {
+      if (d.date === currentDate) continue; // already built
+      // Skip days that are already complete based on real-Jira data we have.
+      if (!isIncomplete(d)) continue;
+      // Skip days that already have suggestions (fully built).
+      const isStub = d.pending || (!d.submitted && !(d.suggested||[]).length && !(d.notes||[]).length);
+      if (!isStub) continue;
+      try {
+        const full = await api('GET', '/days/'+d.date);
+        const i = days.findIndex(x=>x.date===d.date);
+        if (i>=0) days[i] = full;
+        // Update panel only; don't disrupt the detail view.
+        renderList();
+      } catch(_) { /* ignore individual failures */ }
+      // Brief pause between requests so the UI stays responsive.
+      await new Promise(r=>setTimeout(r,150));
+    }
+  } finally {
+    _bgBuildRunning = false;
+  }
+}
+
 async function init() {
   try {
     await refreshBadge();
@@ -2906,6 +2951,8 @@ async function init() {
       // (git/ICS activity) is built even if stubs were returned on startup.
       await fetchAndShowDay(first.date);
     }
+    // Build remaining incomplete stub days in the background.
+    buildIncompleteDaysInBackground();
   } catch(e) { toast('Failed to load days: '+e.message, true); }
 }
 
