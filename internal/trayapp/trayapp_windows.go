@@ -76,7 +76,6 @@ func onReady(version, cfgPath string) {
 
 	// Menu items.
 	mOpenReport := systray.AddMenuItem("Open time report", "Open the review UI in your browser")
-	mOpenMock := systray.AddMenuItem("Mock Jira inspect", "Open the mock Jira inspect page")
 	mOpenLogs := systray.AddMenuItem("Open logs folder", "Open the folder containing the log file")
 	mUpdate := systray.AddMenuItem("Check for updates now", "Check GitHub for a newer version")
 	systray.AddSeparator()
@@ -102,15 +101,12 @@ func onReady(version, cfgPath string) {
 	}()
 
 	webURL := fmt.Sprintf("http://localhost:%d", cfg.WebPort)
-	mockURL := fmt.Sprintf("http://localhost:%d", cfg.MockJiraPort)
 
 	for {
 		select {
 		case <-mOpenReport.ClickedCh:
 			ensureServerRunning(cfg)
 			openBrowser(webURL)
-		case <-mOpenMock.ClickedCh:
-			openBrowser(mockURL)
 		case <-mOpenLogs.ClickedCh:
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
@@ -248,7 +244,7 @@ func ensureServerRunning(cfg config.Config) {
 		log.Printf("ensureServerRunning: %s not found: %v", path, err)
 		return
 	}
-	cmd := exec.Command(path, "--target", "mock", "--no-browser")
+	cmd := exec.Command(path, "--no-browser")
 	// CREATE_NO_WINDOW prevents any console window from appearing.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := cmd.Start(); err != nil {

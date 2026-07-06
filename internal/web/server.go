@@ -1579,16 +1579,10 @@ a{color:#0052cc}
     <option value="SE">🇸🇪 Sweden</option>
   </select>
   <div class="hint" style="margin-top:-10px">When a country is selected, official public holidays are automatically set as holidays in your time report — no ICS entry needed.</div>
-  <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change ports (default 9080 / 9099)</summary>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
-    <div>
-      <label>Review UI port</label>
-      <input type="number" id="w-webPort" value="9080" min="1024" max="65535">
-    </div>
-    <div>
-      <label>Mock Jira port</label>
-      <input type="number" id="w-mockPort" value="9099" min="1024" max="65535">
-    </div>
+  <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change review UI port (default 9080)</summary>
+  <div style="margin-top:10px">
+    <label>Review UI port</label>
+    <input type="number" id="w-webPort" value="9080" min="1024" max="65535">
   </div>
   </details>
   <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
@@ -1708,10 +1702,9 @@ async function saveReposAndFinish(){
   try{
     await api('PUT','/config',{
       localRepos:repos, gitAuthors:authors, icsPath:ics,
-      workdayHours:7, target:'mock-write',
+      workdayHours:7, target:'real',
       country:document.getElementById('w-country').value,
       webPort:+(document.getElementById('w-webPort').value||9080),
-      mockJiraPort:+(document.getElementById('w-mockPort').value||9099),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
       updatePrerelease:document.getElementById('w-updatePrerelease').checked,
     });
@@ -1785,7 +1778,6 @@ async function prefill(){
     if(c.gitAuthors&&c.gitAuthors.length)document.getElementById('w-authors').value=c.gitAuthors.join(', ');
     set('w-ics',c.icsPath);
     if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
-    if(c.mockJiraPort)document.getElementById('w-mockPort').value=c.mockJiraPort;
     if(typeof c.autoUpdate==='boolean')document.getElementById('w-autoUpdate').checked=c.autoUpdate;
     if(typeof c.updatePrerelease==='boolean')document.getElementById('w-updatePrerelease').checked=c.updatePrerelease;
     document.getElementById('w-country').value=c.country||'';
@@ -1985,29 +1977,15 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Workday + ports -->
 <section>
   <h2>Advanced</h2>
-  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Defaults work for most people. Only change these if you use non-standard ports or a different contract hours per day.</p>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Defaults work for most people. Only change these if you use a non-standard port or different contract hours per day.</p>
   <div class="row">
     <div class="field">
       <label>Workday hours</label>
       <input type="number" id="workdayHours" min="1" max="24" step="0.5">
     </div>
     <div class="field">
-      <label>Submit target</label>
-      <select id="target" style="width:100%;padding:7px 10px;border:1px solid #dfe1e6;border-radius:4px;font:inherit">
-        <option value="mock">Mock Jira (safe testing)</option>
-        <option value="mock-write">Mock-write (read real Jira, write mock)</option>
-        <option value="real">Real Jira</option>
-      </select>
-    </div>
-  </div>
-  <div class="row">
-    <div class="field">
       <label>Review UI port</label>
       <input type="number" id="webPort" min="1024" max="65535">
-    </div>
-    <div class="field">
-      <label>Mock Jira port</label>
-      <input type="number" id="mockJiraPort" min="1024" max="65535">
     </div>
   </div>
   <div class="field">
@@ -2024,11 +2002,6 @@ button.secondary:hover{background:#f4f5f7}
   </div>
   <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
   <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
-  <div style="margin-top:18px;padding-top:14px;border-top:1px solid #dfe1e6">
-    <button class="secondary" onclick="clearMockWorklogs()">🧹 Clear all mock Jira worklogs</button>
-    <span id="clear-msg" style="margin-left:12px;font-size:.82rem"></span>
-    <div class="hint">Wipes every worklog from the mock Jira server so you can test submitting again from a clean slate. Never touches real Jira.</div>
-  </div>
 </section>
 
 </main>
@@ -2085,8 +2058,6 @@ async function loadConfig() {
     document.getElementById('gitAuthors').value = (c.gitAuthors||[]).join(', ');
     document.getElementById('workdayHours').value = c.workdayHours||7;
     document.getElementById('webPort').value = c.webPort||9080;
-    document.getElementById('mockJiraPort').value = c.mockJiraPort||9099;
-    document.getElementById('target').value = c.target||'mock';
     document.getElementById('autoUpdate').checked = c.autoUpdate!==false;
     document.getElementById('updatePrerelease').checked = c.updatePrerelease===true;
     document.getElementById('country').value = c.country||'';
@@ -2118,8 +2089,6 @@ async function saveConfig() {
       gitAuthors: authors,
       workdayHours: +document.getElementById('workdayHours').value,
       webPort: +document.getElementById('webPort').value,
-      mockJiraPort: +document.getElementById('mockJiraPort').value,
-      target: document.getElementById('target').value,
       autoUpdate: document.getElementById('autoUpdate').checked,
       updatePrerelease: document.getElementById('updatePrerelease').checked,
       country: document.getElementById('country').value,
@@ -2169,19 +2138,6 @@ async function saveAndRebuild() {
     const a = document.createElement('a');
     a.href = '/'; a.textContent = 'Go to time report →';
     document.getElementById('cfg-msg').appendChild(a);
-  } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
-}
-
-async function clearMockWorklogs() {
-  if (!confirm('Delete ALL worklogs from the mock Jira server? (Real Jira is not affected.)')) return;
-  const msg = document.getElementById('clear-msg');
-  msg.textContent = 'Clearing…'; msg.style.color = '#6b778c';
-  try {
-    const res = await api('POST','/mock/clear-worklogs');
-    msg.textContent = '✅ Cleared '+(res.deleted!=null?res.deleted:'all')+' worklog(s). Rebuilding…';
-    msg.style.color = '#00875a';
-    await api('POST','/reload');
-    msg.textContent = '✅ Mock worklogs cleared and plans rebuilt.';
   } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
 }
 
@@ -2299,14 +2255,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 </div>
 <header>
   <h1>Timereporting Assistant</h1>
-  <span id="target-badge" class="badge">loading…</span>
   <span style="margin-left:auto;display:flex;align-items:center;gap:10px">
-    <label id="target-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:.85rem;user-select:none"
-           title="Toggle between Mock Jira (safe) and Real Jira (writes to your timesheet)">
-      <input type="checkbox" id="real-jira-chk" onchange="onTargetCheckbox(this.checked)"
-             style="width:16px;height:16px;cursor:pointer">
-      <span id="target-chk-label" style="font-weight:600">Submit to Real Jira</span>
-    </label>
     <a href="/settings" style="color:#fff;font-size:.8rem;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
   </span>
 </header>
@@ -2865,49 +2814,19 @@ async function refresh(date) {
   if (currentDate===date) renderDetail(day);
 }
 
-async function refreshBadge() {
-  const status = await api('GET','/status');
-  const badge = document.getElementById('target-badge');
-  badge.textContent = 'Read: ' + status.read + ' | Write: ' + status.write;
-  const isReal = status.activeWrite === 'real';
-  badge.style.background = isReal ? '#de350b' : '#0747a6';
-  // Sync checkbox + label
-  const chk = document.getElementById('real-jira-chk');
-  const lbl = document.getElementById('target-chk-label');
-  chk.checked = isReal;
-  chk.disabled = !status.realAvailable;
-  if (isReal) {
-    lbl.textContent = '⚠ Submitting to Real Jira';
-    lbl.style.color = '#ffebe6';
-  } else {
-    lbl.textContent = 'Submit to Real Jira';
-    lbl.style.color = '#fff';
-  }
-}
-
-async function onTargetCheckbox(checked) {
-  const target = checked ? 'real' : 'mock';
-  if (checked && !confirm('⚠ Switch to REAL Jira?\n\nWorklogs will be written to your actual timesheet. Make sure you have reviewed the day plans carefully before submitting.')) {
-    await refreshBadge(); // revert checkbox
-    return;
-  }
+async function init() {
   try {
-    await api('PUT','/target',{target});
-    await refreshBadge();
-    toast('Submit target set to ' + (checked ? '⚠ Real Jira' : 'Mock Jira') + '.');
-  } catch(e) {
-    toast(e.message, true);
-    await refreshBadge(); // revert on error
-  }
+    days = await api('GET','/days');
+    renderList();
+    if (days.length) {
+      const first = days.find(isIncomplete) || days[0];
+      await fetchAndShowDay(first.date);
+    }
+    buildIncompleteDaysInBackground();
+  } catch(e) { toast('Failed to load days: '+e.message, true); }
 }
 
-async function setWriteTarget(target) {
-  // kept for backward compatibility; delegates to checkbox handler
-  const checked = target === 'real';
-  document.getElementById('real-jira-chk').checked = checked;
-  await onTargetCheckbox(checked);
-}
-
+init();
 // buildIncompleteDaysInBackground fetches the full plan for every stub day
 // that is incomplete (real Jira < 7h). Days already at or above target are
 // skipped — there is nothing to build or suggest for them.

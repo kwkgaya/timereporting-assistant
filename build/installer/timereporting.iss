@@ -35,21 +35,15 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
 RestartApplications=no
 
-[Components]
-Name: "core"; Description: "Core application (review UI + CLI)"; Types: full custom; Flags: fixed
-Name: "mock"; Description: "Mock Jira server (safe local testing target)"; Types: full custom
-
 [Files]
-Source: "{#DistDir}\timeporting.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "{#DistDir}\tray.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "{#DistDir}\mockjira.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: mock
-Source: "{#DistDir}\config.example.json"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion; Components: core
+Source: "{#DistDir}\timeporting.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#DistDir}\tray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#DistDir}\config.example.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Comment: "Review and submit your time reports"
 Name: "{group}\Timereporting Tray"; Filename: "{app}\tray.exe"; Comment: "System-tray companion (also starts automatically at login)"
-Name: "{group}\Mock Jira (inspect)"; Filename: "{app}\mockjira.exe"; Components: mock
 Name: "{group}\Uninstall Timereporting Assistant"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Tasks: desktopicon
 
