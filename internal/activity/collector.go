@@ -251,8 +251,9 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		"-C", repoPath,
 		"log",
 		"--all",
+		"--source",
 		"--no-merges",
-		"--format=%H%x1F%ae%x1F%s%x1F%D%x1F%aI",
+		"--format=%H%x1F%ae%x1F%s%x1F%S%x1F%aI",
 		"--after=" + after,
 		"--before=" + before,
 	}
