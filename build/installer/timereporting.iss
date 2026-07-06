@@ -74,7 +74,7 @@ Filename: "{app}\tray.exe"; \
 ; on first run (no config yet). Only on interactive installs (skipifsilent),
 ; so silent auto-updates don't pop a browser window.
 Filename: "{app}\timeporting.exe"; \
-  Description: "Open setup wizard now"; \
+  Description: "Open configuration wizard now"; \
   Flags: nowait postinstall skipifsilent runhidden
 
 [UninstallRun]
