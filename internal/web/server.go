@@ -2446,50 +2446,52 @@ function renderDetail(day) {
     setTimeout(()=>{day.existing.forEach(w=>{ if(w.issueKey) fetchIssueTitle(w.issueKey,'ex-key-'+day.date+'-'+w.id); });},0);
   }
 
-  // Suggested worklogs (editable)
-  html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
-  html += '<table id="sugg-table"><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th><th></th></tr>';
-  (day.suggested||[]).forEach((w,i) => {
-    const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
-    const submitted = w.submitted;
-    const kid = 'key-'+day.date+'-'+i;
-    html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
-      +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
-      +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
-      +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
-      +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
-      +'<td>'+(submitted?'':' <button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
-      +'</tr>';
-  });
-  if (!day.suggested || day.suggested.length===0) {
-    if (day.submitted) {
-      html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions.</td></tr>';
+  // Suggested worklogs — hidden when existing Jira time already reaches the target.
+  const dayFull = existMins >= 420;
+  if (!dayFull) {
+    html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
+    html += '<table id="sugg-table"><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th><th></th></tr>';
+    (day.suggested||[]).forEach((w,i) => {
+      const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
+      const submitted = w.submitted;
+      const kid = 'key-'+day.date+'-'+i;
+      html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
+        +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
+        +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
+        +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
+        +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
+        +'<td>'+(submitted?'':' <button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
+        +'</tr>';
+    });
+    if (!day.suggested || day.suggested.length===0) {
+      if (day.submitted) {
+        html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions.</td></tr>';
+      }
     }
+    if (!day.submitted) {
+      html += '<tr class="new-row"><td>'
+        +'<input type="text" id="new-issue-input" placeholder="+ Type to search Jira issues…" autocomplete="off" '
+          +'oninput="onIssueSearchInput(this.value)" onkeydown="onNewRowKey(event,this)" onblur="setTimeout(hideIssueResults,200)">'
+        +'<div class="issue-search-results" id="issue-search-results"></div></td>'
+        +'<td colspan="4" style="color:#6b778c;font-size:.8rem">Pick an issue, or type a key &amp; press Enter, to add a row</td></tr>';
+    }
+    if (day.suggested && day.suggested.length) {
+      html += '<tr class="sugg-total"><td style="text-align:right">Total</td>'
+        +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
+    }
+    html += '</table>';
   }
-  if (!day.submitted) {
-    // Always-visible entry row: the issue-key box searches Jira as you type.
-    html += '<tr class="new-row"><td>'
-      +'<input type="text" id="new-issue-input" placeholder="+ Type to search Jira issues…" autocomplete="off" '
-        +'oninput="onIssueSearchInput(this.value)" onkeydown="onNewRowKey(event,this)" onblur="setTimeout(hideIssueResults,200)">'
-      +'<div class="issue-search-results" id="issue-search-results"></div></td>'
-      +'<td colspan="4" style="color:#6b778c;font-size:.8rem">Pick an issue, or type a key &amp; press Enter, to add a row</td></tr>';
-  }
-  if (day.suggested && day.suggested.length) {
-    html += '<tr class="sugg-total"><td style="text-align:right">Total</td>'
-      +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
-  }
-  html += '</table>';
 
-  // Summary — moved below the suggested worklogs, larger & bolder.
-  html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
-    +' &bull; Suggested: '+hm(suggMins)
-    +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
-
-  // Submit actions — below the suggested worklogs.
-  if (!day.submitted) {
-    html += '<div class="controls" style="margin-bottom:16px">'
-      +'<button class="primary" onclick="submitDay(\''+day.date+'\')" >Approve &amp; submit</button>'
-      +'</div>';
+  // Summary and submit — only shown when the day still needs work.
+  if (!dayFull) {
+    html += '<div class="summary-line">Target: 7h &bull; Existing: '+hm(existMins)
+      +' &bull; Suggested: '+hm(suggMins)
+      +' &bull; Total: <span class="'+totalCls+'">'+hm(total)+'</span></div>';
+    if (!day.submitted) {
+      html += '<div class="controls" style="margin-bottom:16px">'
+        +'<button class="primary" onclick="submitDay(\''+day.date+'\')" >Approve &amp; submit</button>'
+        +'</div>';
+    }
   }
 
   // Notes (below the suggested worklogs)
