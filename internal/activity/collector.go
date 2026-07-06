@@ -252,7 +252,7 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		"log",
 		"--all",
 		"--no-merges",
-		"--format=%H%x1F%ae%x1F%s%x1F%D",
+		"--format=%H%x1F%ae%x1F%s%x1F%D%x1F%aI",
 		"--after=" + after,
 		"--before=" + before,
 	}
@@ -276,7 +276,7 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\x1f", 4)
+		parts := strings.SplitN(line, "\x1f", 5)
 		if len(parts) < 3 {
 			continue
 		}
@@ -290,16 +290,25 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		newHashes[fullHash] = true
 
 		subject := parts[2]
-		shortHash := fullHash[:min(7, len(fullHash))]
-		ref := shortHash
-		if len(parts) == 4 && parts[3] != "" {
-			ref = parts[3] + " " + shortHash
+		// Build a human-readable ref: repo + branch + commit time (no hash — not useful for Rovo).
+		commitTime := ""
+		if len(parts) == 5 && parts[4] != "" {
+			// Parse ISO date and reformat as "15:04" for brevity.
+			if t, err := time.Parse(time.RFC3339, parts[4]); err == nil {
+				commitTime = " " + t.Format("15:04")
+			}
+		}
+		ref := ""
+		if len(parts) >= 4 && parts[3] != "" {
+			ref = parts[3] + commitTime
+		} else {
+			ref = commitTime
 		}
 		acts = append(acts, model.Activity{
 			Date:   day,
 			Source: SourceLocalGit,
 			Text:   subject,
-			Ref:    repoPath + " " + ref,
+			Ref:    strings.TrimSpace(repoPath + " " + ref),
 		})
 	}
 	return acts, newHashes, nil
@@ -352,11 +361,22 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		seenHash[fullHash] = true // mark so the same hash from another reflog entry is not re-added
 
 		subject := parts[3]
+		// Use the author date/time instead of the hash.
+		commitTime := ""
+		if t, err := time.Parse(time.RFC3339, parts[2]); err == nil {
+			commitTime = t.Format("15:04")
+		}
+		ref := repoPath
+		if commitTime != "" {
+			ref += " " + commitTime + " (reflog)"
+		} else {
+			ref += " (reflog)"
+		}
 		acts = append(acts, model.Activity{
 			Date:   day,
 			Source: SourceLocalGitReflog,
 			Text:   subject,
-			Ref:    repoPath + " " + fullHash[:min(7, len(fullHash))] + " (reflog)",
+			Ref:    ref,
 		})
 	}
 	return acts, nil
