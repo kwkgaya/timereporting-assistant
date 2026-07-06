@@ -2427,18 +2427,19 @@ function renderDetail(day) {
   // Existing worklogs — issue key is read-only; time (Jira format) and comment are editable.
   if (day.existing && day.existing.length) {
     html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
-    html += '<table><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
+    html += '<table><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
       html += '<tr class="cat-existing">'
+        // Delete first
+        +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
         // Key: plain text + lazy title, not editable
         +'<td><span style="font-weight:600">'+esc(w.issueKey)+'</span>'
           +'<div class="issue-title" id="'+eid+'"></div></td>'
         // Time: Jira-format text input
-        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')"></td>'
+        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')">' +'</td>'
         // Comment: plain text input
         +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
-        +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
         +'</tr>';
     });
     html += '</table>';
@@ -2450,17 +2451,17 @@ function renderDetail(day) {
   const dayFull = existMins >= 420;
   if (!dayFull) {
     html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
-    html += '<table id="sugg-table"><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th><th></th></tr>';
+    html += '<table id="sugg-table"><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     (day.suggested||[]).forEach((w,i) => {
       const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
       const submitted = w.submitted;
       const kid = 'key-'+day.date+'-'+i;
       html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
+        +'<td>'+(submitted?'':'<button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
         +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
         +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
         +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
         +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
-        +'<td>'+(submitted?'':' <button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
         +'</tr>';
     });
     if (!day.suggested || day.suggested.length===0) {
@@ -2469,15 +2470,15 @@ function renderDetail(day) {
       }
     }
     if (!day.submitted) {
-      html += '<tr class="new-row"><td>'
+      html += '<tr class="new-row"><td></td><td>'
         +'<input type="text" id="new-issue-input" placeholder="+ Type to search Jira issues…" autocomplete="off" '
           +'oninput="onIssueSearchInput(this.value)" onkeydown="onNewRowKey(event,this)" onblur="setTimeout(hideIssueResults,200)">'
         +'<div class="issue-search-results" id="issue-search-results"></div></td>'
-        +'<td colspan="4" style="color:#6b778c;font-size:.8rem">Pick an issue, or type a key &amp; press Enter, to add a row</td></tr>';
+        +'<td colspan="3" style="color:#6b778c;font-size:.8rem">Pick an issue, or type a key &amp; press Enter, to add a row</td></tr>';
     }
     if (day.suggested && day.suggested.length) {
-      html += '<tr class="sugg-total"><td style="text-align:right">Total</td>'
-        +'<td>'+hm(suggMins)+'</td><td></td><td></td><td></td></tr>';
+      html += '<tr class="sugg-total"><td></td><td style="text-align:right">Total</td>'
+        +'<td>'+hm(suggMins)+'</td><td></td><td></td></tr>';
     }
     html += '</table>';
   }
