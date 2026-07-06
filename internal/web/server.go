@@ -2487,8 +2487,7 @@ function renderDetail(day) {
   // Submit actions — below the suggested worklogs.
   if (!day.submitted) {
     html += '<div class="controls" style="margin-bottom:16px">'
-      +'<button class="primary" onclick="submitDay(\''+day.date+'\',false)">Approve &amp; submit</button>'
-      +'<button onclick="submitDay(\''+day.date+'\',true)">Dry run</button>'
+      +'<button class="primary" onclick="submitDay(\''+day.date+'\')" >Approve &amp; submit</button>'
       +'</div>';
   }
 
@@ -2761,16 +2760,14 @@ async function submitRow(date, rowIdx) {
   } catch(e) { toast(e.message, true); }
 }
 
-async function submitDay(date, dryRun) {
+async function submitDay(date) {
   try {
-    const res = await api('POST','/days/'+date+'/submit',{dryRun});
-    if (!dryRun) {
-      const i = days.findIndex(d=>d.date===date);
-      if (i>=0) days[i].submitted = true;
-    }
+    const res = await api('POST','/days/'+date+'/submit',{dryRun:false});
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i].submitted = true;
     const n = (res.submitted||[]).length;
-    toast((dryRun?'Dry run: ':'Submitted: ')+n+' worklog(s) to '+res.target+'.');
-    if (!dryRun) { await refresh(date); }
+    toast('Submitted: '+n+' worklog(s) to '+res.target+'.');
+    await refresh(date);
   } catch(e) { toast(e.message, true); }
 }
 
