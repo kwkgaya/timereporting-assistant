@@ -2426,7 +2426,7 @@ function renderDetail(day) {
 
   // Existing worklogs — issue key is read-only; time (Jira format) and comment are editable.
   if (day.existing && day.existing.length) {
-    html += '<strong>Already logged in Jira</strong>';
+    html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
     html += '<table><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
@@ -2447,7 +2447,7 @@ function renderDetail(day) {
   }
 
   // Suggested worklogs (editable)
-  html += '<strong>Suggested worklogs</strong>';
+  html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
   html += '<table id="sugg-table"><tr><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th><th></th></tr>';
   (day.suggested||[]).forEach((w,i) => {
     const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
