@@ -2433,11 +2433,10 @@ function renderDetail(day) {
       html += '<tr class="cat-existing">'
         // Delete first
         +'<td><button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button></td>'
-        // Key: plain text + lazy title, not editable
-        +'<td><span style="font-weight:600">'+esc(w.issueKey)+'</span>'
-          +'<div class="issue-title" id="'+eid+'"></div></td>'
+        // Key + title in a readonly input (fetchIssueTitle fills in the title)
+        +'<td><input type="text" id="'+eid+'" value="'+esc(w.issueKey)+'" readonly style="width:100%;background:transparent;border:none;font-weight:600;cursor:default" tabindex="-1"></td>'
         // Time: Jira-format text input
-        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')">' +'</td>'
+        +'<td><input type="text" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="updateExistingTime(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\',this.value,\''+esc(w.comment)+'\')">'+'</td>'
         // Comment: plain text input
         +'<td><input type="text" value="'+esc(w.comment)+'" style="width:100%" onchange="updateExisting(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\','+w.minutes+',this.value)" title="Edit comment"></td>'
         +'</tr>';
