@@ -2165,7 +2165,7 @@ main{display:grid;grid-template-columns:230px 1fr;height:calc(100vh - 48px)}
 .total-warn{color:#ff5630;font-weight:600}
 /* Detail panel */
 #detail{padding:20px;overflow-y:auto;flex:1}
-.day-nav{display:flex;align-items:center;gap:16px;margin-bottom:12px}
+.day-nav{display:inline-flex;align-items:center;gap:8px;margin-bottom:12px}
 .day-nav h2{flex:1;text-align:center;margin:0;font-size:1.3rem}
 .nav-btn{font-size:1.8rem;line-height:1;background:#fff;border:1px solid #dfe1e6;border-radius:8px;padding:6px 22px;cursor:pointer;color:#0052cc}
 .nav-btn:hover{background:#e9f2ff}
@@ -2406,7 +2406,7 @@ function renderDetail(day) {
 
   let html = '<div class="day-nav">'
     +'<button class="nav-btn" onclick="gotoDay(-1)" title="Previous day">‹</button>'
-    +'<h2>'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
+    +'<h2 style="margin:0;font-size:1.3rem">'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
     +(day.submitted?' <span class="badge-submitted">Submitted</span>':'')+'</h2>'
     +'<button class="nav-btn" onclick="gotoDay(1)" title="Next day">›</button>'
     +'</div>';
