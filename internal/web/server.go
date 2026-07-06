@@ -2366,6 +2366,7 @@ button.danger:hover{background:#bf2600}
 button:disabled{opacity:.5;cursor:not-allowed}
 /* Worklog tables */
 table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:.85rem}
+.wl-table{table-layout:fixed}
 th,td{border:1px solid #dfe1e6;padding:6px 10px;text-align:left;vertical-align:middle}
 th{background:#f4f5f7;font-size:.8rem;font-weight:600}
 td input[type=number]{width:60px;border:1px solid #dfe1e6;border-radius:3px;padding:3px 5px;font:inherit}
@@ -2613,7 +2614,8 @@ function renderDetail(day) {
   // Existing worklogs — read-only by default; click ✏️ to edit time/comment.
   if (day.existing && day.existing.length) {
     html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
-    html += '<table><tr><th style="width:52px"></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
+    html += '<table class="wl-table"><colgroup><col style="width:52px"><col><col style="width:92px"><col></colgroup>';
+    html += '<tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
       const editing = editingExisting.has(w.id);
@@ -2647,7 +2649,8 @@ function renderDetail(day) {
   const dayFull = existMins >= 420;
   if (!dayFull) {
     html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
-    html += '<table id="sugg-table"><tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
+    html += '<table id="sugg-table" class="wl-table"><colgroup><col style="width:52px"><col><col style="width:92px"><col><col style="width:72px"></colgroup>';
+    html += '<tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     (day.suggested||[]).forEach((w,i) => {
       const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
       const submitted = w.submitted;
@@ -2655,7 +2658,7 @@ function renderDetail(day) {
       html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
         +'<td>'+(submitted?'':'<button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
         +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
-        +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:80px" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
+        +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:100%" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
         +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
         +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
         +'</tr>';
