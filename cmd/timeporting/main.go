@@ -102,7 +102,7 @@ func runMain() {
 	}
 
 	// ── Credential setup if needed ─────────────────────────────────────────
-	if cfg.NeedsRealJiraRead() {
+	if cfg.NeedsJiraRead() {
 		if err := setup.EnsureCredentials(&cfg, true); err != nil {
 			log.Fatalf("credential setup: %v", err)
 		}
@@ -110,10 +110,10 @@ func runMain() {
 
 	// ── Target summary ─────────────────────────────────────────────────────
 	switch cfg.Target {
-	case config.TargetReal:
-		fmt.Println("⚠️  TARGET = REAL JIRA. Worklogs will be written to your actual timesheet.")
+	case config.TargetJira:
+		fmt.Println("⚠️  Worklogs will be written to your Jira timesheet.")
 	case config.TargetMockWrite:
-		fmt.Printf("Target = mock-write (reading real Jira, writing to mock http://localhost:%d)\n", cfg.MockJiraPort)
+		fmt.Printf("Target = mock-write (reading Jira, writing to mock http://localhost:%d)\n", cfg.MockJiraPort)
 	default:
 		fmt.Printf("Target = mock Jira (http://localhost:%d)\n", cfg.MockJiraPort)
 	}
@@ -145,7 +145,7 @@ func runMain() {
 
 	// ── Jira clients (split read/write for mock-write mode) ────────────────
 	// If any target uses the mock, make sure it's running.
-	if cfg.Target != config.TargetReal {
+	if cfg.Target != config.TargetJira {
 		ensureMockRunning(cfg.MockJiraPort)
 	}
 
@@ -165,7 +165,7 @@ func runMain() {
 
 		var rc *jira.Client // read client
 		switch c.Target {
-		case config.TargetReal, config.TargetMockWrite:
+		case config.TargetJira, config.TargetMockWrite:
 			rc = rb
 		}
 		if rc == nil {
@@ -255,7 +255,7 @@ func runMain() {
 
 	stubRC := mockClient
 	switch cfg.Target {
-	case config.TargetReal, config.TargetMockWrite:
+	case config.TargetJira, config.TargetMockWrite:
 		if realClient != nil {
 			stubRC = realClient
 		}
@@ -303,7 +303,7 @@ func runMain() {
 		}
 		var rc *jira.Client
 		switch c.Target {
-		case config.TargetReal, config.TargetMockWrite:
+		case config.TargetJira, config.TargetMockWrite:
 			rc = rb
 		}
 		if rc == nil {
@@ -377,7 +377,7 @@ func runMain() {
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))
 	fmt.Printf("   Writing to: %s\n", writeLabel(cfg.Target, cfg.MockJiraPort))
-	if cfg.Target != config.TargetReal {
+	if cfg.Target != config.TargetJira {
 		fmt.Printf("   Mock Jira inspect → http://localhost:%d\n", cfg.MockJiraPort)
 	}
 
@@ -397,7 +397,7 @@ func runMain() {
 
 func readLabel(target string) string {
 	switch target {
-	case config.TargetReal, config.TargetMockWrite:
+	case config.TargetJira, config.TargetMockWrite:
 		return "Real Jira (read-only)"
 	default:
 		return "Mock Jira"
@@ -406,7 +406,7 @@ func readLabel(target string) string {
 
 func writeLabel(target string, mockPort int) string {
 	switch target {
-	case config.TargetReal:
+	case config.TargetJira:
 		return "Real Jira ⚠️"
 	default:
 		return fmt.Sprintf("Mock Jira (http://localhost:%d)", mockPort)

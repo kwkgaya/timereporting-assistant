@@ -52,7 +52,7 @@ type WlogView struct {
 	Category  string `json:"category"`
 	Author    string `json:"author,omitempty"`
 	Submitted bool   `json:"submitted,omitempty"` // true once individually submitted
-	// Source is "real" (read from real Jira), "mock" (read/submitted to mock),
+	// Source is "real" (read from Jira), "mock" (read/submitted to mock),
 	// or "" for suggested/manual worklogs not yet submitted.
 	Source string `json:"source,omitempty"`
 }
@@ -77,7 +77,7 @@ type Server struct {
 	days        []DayView      // ordered by date
 	dayIndex    map[string]int // date -> index
 	mockClient  *jira.Client   // writes to the mock server
-	realClient  *jira.Client   // writes to real Jira; nil when no credentials
+	jiraClient  *jira.Client   // writes to Jira; nil when no credentials
 	activeWrite string         // "mock" | "real" — where submits currently go
 	readSource  string         // display label for where existing worklogs were read
 	port        int
@@ -89,7 +89,7 @@ type Server struct {
 }
 
 // New creates a Server. mockClient always writes to the mock; realClient (may be
-// nil) writes to real Jira. target ("mock"/"mock-write"/"real") sets the initial
+// nil) writes to Jira. target ("mock"/"mock-write"/"real") sets the initial
 // read-source label and active write target.
 func New(plans []model.DayPlan, mockClient, realClient *jira.Client, target string, port int) *Server {
 	readSource, _ := targetLabels(target)
@@ -100,7 +100,7 @@ func New(plans []model.DayPlan, mockClient, realClient *jira.Client, target stri
 	s := &Server{
 		dayIndex:    map[string]int{},
 		mockClient:  mockClient,
-		realClient:  realClient,
+		jiraClient:  realClient,
 		activeWrite: activeWrite,
 		readSource:  readSource,
 		port:        port,
@@ -159,10 +159,10 @@ func (s *Server) WithPendingDays(dates []string) *Server {
 // writeClient returns the jira client for the current active write target.
 func (s *Server) writeClient() (*jira.Client, string, error) {
 	if s.activeWrite == "real" {
-		if s.realClient == nil {
-			return nil, "", fmt.Errorf("no real Jira credentials configured")
+		if s.jiraClient == nil {
+			return nil, "", fmt.Errorf("no Jira credentials configured")
 		}
-		return s.realClient, "Real Jira", nil
+		return s.jiraClient, "Jira", nil
 	}
 	return s.mockClient, "Mock Jira", nil
 }
@@ -411,7 +411,7 @@ func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.
 		s.mockClient = mockClient
 	}
 	if realClient != nil {
-		s.realClient = realClient
+		s.jiraClient = realClient
 	}
 	s.mu.Unlock()
 }
@@ -420,9 +420,9 @@ func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.
 // the day plans were built from. Caller must hold s.mu.
 func (s *Server) readClientLocked() *jira.Client {
 	switch s.cfg.Target {
-	case config.TargetReal, config.TargetMockWrite:
-		if s.realClient != nil {
-			return s.realClient
+	case config.TargetJira, config.TargetMockWrite:
+		if s.jiraClient != nil {
+			return s.jiraClient
 		}
 	}
 	return s.mockClient
@@ -488,7 +488,7 @@ func (s *Server) apiSearchIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiClearMockWorklogs wipes all worklogs from the mock Jira server (testing
-// convenience). It never touches real Jira.
+// convenience). It never touches Jira.
 func (s *Server) apiClearMockWorklogs(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	port := s.cfg.MockJiraPort
@@ -587,7 +587,7 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 	s.cfg.Jira.APIBase = apiBase
 	s.cfg.Jira.Email = email
 	s.cfg.JiraAPIToken = token
-	s.realClient = jira.NewClient(apiBase, email, token)
+	s.jiraClient = jira.NewClient(apiBase, email, token)
 	cfgPath := s.cfgPath
 	cfg := s.cfg
 	s.mu.Unlock()
@@ -775,7 +775,7 @@ func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if author != "" {
-		// Author is empty in mock (fine); enforce on real Jira only when author is known.
+		// Author is empty in mock (fine); enforce on Jira only when author is known.
 		_ = author // real-Jira guard: let Jira return 403 if the user doesn't own it.
 	}
 
@@ -810,7 +810,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"read":          s.readSource,
 		"write":         write,
 		"activeWrite":   s.activeWrite,
-		"realAvailable": s.realClient != nil,
+		"realAvailable": s.jiraClient != nil,
 	})
 }
 
@@ -819,7 +819,7 @@ func (s *Server) apiGetTarget(w http.ResponseWriter, _ *http.Request) {
 	defer s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"activeWrite":   s.activeWrite,
-		"realAvailable": s.realClient != nil,
+		"realAvailable": s.jiraClient != nil,
 	})
 }
 
@@ -837,14 +837,14 @@ func (s *Server) apiPutTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if body.Target == "real" && s.realClient == nil {
-		writeErr(w, http.StatusBadRequest, "real Jira has no credentials configured; run 'timeporting credentials'")
+	if body.Target == "real" && s.jiraClient == nil {
+		writeErr(w, http.StatusBadRequest, "Jira credentials not configured; run the setup wizard")
 		return
 	}
 	s.activeWrite = body.Target
 	writeJSON(w, http.StatusOK, map[string]any{
 		"activeWrite":   s.activeWrite,
-		"realAvailable": s.realClient != nil,
+		"realAvailable": s.jiraClient != nil,
 	})
 }
 
@@ -852,9 +852,9 @@ func (s *Server) apiPutTarget(w http.ResponseWriter, r *http.Request) {
 func targetLabels(target string) (read, write string) {
 	switch target {
 	case "real":
-		return "Real Jira", "Real Jira"
+		return "Jira", "Jira"
 	case "mock-write":
-		return "Real Jira", "Mock Jira"
+		return "Jira", "Mock Jira"
 	default: // "mock"
 		return "Mock Jira", "Mock Jira"
 	}
@@ -1021,7 +1021,7 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 				return
 			} else {
 				wl.ID = id.ID
-				wl.Source = writeLabel // "Mock Jira" or "Real Jira"
+				wl.Source = writeLabel // "Mock Jira" or "Jira"
 				if s.activeWrite == "mock" {
 					wl.Source = "mock"
 				} else {
@@ -1860,7 +1860,7 @@ button.secondary:hover{background:#f4f5f7}
 <!-- Jira configuration -->
 <section>
   <h2>Jira</h2>
-  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Required. The tool reads your existing worklogs from Jira and, after you approve, writes new ones. Your real Jira is <strong>read-only</strong> until you explicitly choose the "Real Jira" target.</p>
+  <p style="font-size:.85rem;color:#42526e;margin:0 0 16px">Required. The tool reads your existing worklogs from Jira and, after you approve, writes new ones.</p>
   <div class="row">
     <div class="field">
       <label>Jira base URL *</label>
@@ -2242,7 +2242,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 </main>
 <div id="toast"></div>
 <script>
-const TARGET_LABELS = {mock:'MOCK JIRA',real:'REAL JIRA'};
+const TARGET_LABELS = {mock:'MOCK JIRA',real:'JIRA'};
 let days = [];
 let currentDate = null;
 
@@ -2275,21 +2275,21 @@ function totalMins(day) {
        + (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
 }
 
-// realJiraMins returns the minutes already logged in real Jira for the day.
-function realJiraMins(day) {
+// jiraMins returns the minutes already logged in Jira for the day.
+function jiraMins(day) {
   return (day.existing||[])
     .filter(w=>w.source==='real')
     .reduce((a,w)=>a+w.minutes,0);
 }
 
-// isIncomplete: a day is incomplete if real Jira has less than 7h logged.
+// isIncomplete: a day is incomplete if Jira has less than 7h logged.
 // Holiday and full_leave days are always considered complete.
 // Future days (after today) are never shown as incomplete.
 function isIncomplete(day) {
   if (!day) return false;
   if (day.status==='holiday' || day.status==='full_leave') return false;
   if (day.date > todayStr()) return false;
-  return realJiraMins(day) < 420;
+  return jiraMins(day) < 420;
 }
 
 // renderList updates the date picker, the toolbar count, and the incomplete panel.
@@ -2314,7 +2314,7 @@ function renderList() {
     return;
   }
   panel.innerHTML = incomplete.map(d => {
-    const rMins = realJiraMins(d);
+    const rMins = jiraMins(d);
     const cls = 'iday-item'+(d.date===currentDate?' active':'');
     const logCls = rMins===0?'empty':'partial';
     return '<div class="'+cls+'" onclick="selectDay(\''+d.date+'\')">'
@@ -2429,8 +2429,9 @@ function renderDetail(day) {
     const hasReal = day.existing.some(w=>w.source==='real');
     const hasMock = day.existing.some(w=>w.source==='mock');
     let legend = '';
-    if (hasReal) legend += '<span class="src-real-badge">✓ Real Jira</span>';
-    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock Jira</span>';
+    if (hasReal) legend += '<span class="src-real-badge">✓ Jira</span>';
+    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock</span>';
+    if (hasMock) legend += '<span class="src-mock-badge">⚗ Mock</span>';
     html += '<strong>Already logged in Jira</strong>'+legend;
     html += '<table><tr><th>Issue</th><th>Time</th><th>Comment</th><th></th></tr>';
     day.existing.forEach(w => {
@@ -2793,7 +2794,7 @@ async function init() {
 
 init();
 // buildIncompleteDaysInBackground fetches the full plan for every stub day
-// that is incomplete (real Jira < 7h). Days already at or above target are
+// that is incomplete (Jira < 7h). Days already at or above target are
 // skipped — there is nothing to build or suggest for them.
 // Runs sequentially with a small pause between requests to avoid hammering
 // the server while the user is working.

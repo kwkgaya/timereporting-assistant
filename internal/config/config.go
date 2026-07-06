@@ -39,8 +39,8 @@ func DefaultPath() string {
 // Target selects where worklogs are submitted.
 const (
 	TargetMock      = "mock"
-	TargetMockWrite = "mock-write" // read from real Jira, write to mock
-	TargetReal      = "real"
+	TargetMockWrite = "mock-write" // read from Jira, write to mock
+	TargetJira      = "real"
 )
 
 // Environment variable names for secrets.
@@ -101,7 +101,7 @@ func Default() Config {
 		GitHub:           GitHubConfig{APIBaseURL: "https://api.github.com"},
 		MockJiraPort:     9099,
 		WebPort:          9080,
-		Target:           TargetReal,
+		Target:           TargetJira,
 		AutoUpdate:       true,
 		UpdatePrerelease: false,
 	}
@@ -166,7 +166,7 @@ func Load(path string) (Config, error) {
 		cfg.GitHub.APIBaseURL = def.GitHub.APIBaseURL
 	}
 	if cfg.Target == "" {
-		cfg.Target = TargetReal
+		cfg.Target = TargetJira
 	}
 	return cfg, nil
 }
@@ -183,7 +183,7 @@ func (c Config) Validate() error {
 	if c.WorkdayHours <= 0 {
 		missing = append(missing, "workdayHours (> 0)")
 	}
-	if c.Target != TargetMock && c.Target != TargetMockWrite && c.Target != TargetReal {
+	if c.Target != TargetMock && c.Target != TargetMockWrite && c.Target != TargetJira {
 		missing = append(missing, `target ("mock", "mock-write", or "real")`)
 	}
 	if len(missing) > 0 {
@@ -192,14 +192,14 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// NeedsRealJiraRead returns true when the target requires reading from real Jira.
-func (c Config) NeedsRealJiraRead() bool {
-	return c.Target == TargetMockWrite || c.Target == TargetReal
+// NeedsJiraRead returns true when the target requires reading from Jira.
+func (c Config) NeedsJiraRead() bool {
+	return c.Target == TargetMockWrite || c.Target == TargetJira
 }
 
-// NeedsRealJiraWrite returns true when the target writes to real Jira.
-func (c Config) NeedsRealJiraWrite() bool {
-	return c.Target == TargetReal
+// NeedsJiraWrite returns true when the target writes to Jira.
+func (c Config) NeedsJiraWrite() bool {
+	return c.Target == TargetJira
 }
 
 // JiraAPIBase returns the base URL to use for Jira REST API calls.

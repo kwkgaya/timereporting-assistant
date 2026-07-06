@@ -16,8 +16,8 @@ func TestLoadDefaultsWhenNoPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(\"\") error: %v", err)
 	}
-	if cfg.Target != TargetReal {
-		t.Errorf("default target = %q, want %q", cfg.Target, TargetReal)
+	if cfg.Target != TargetJira {
+		t.Errorf("default target = %q, want %q", cfg.Target, TargetJira)
 	}
 	if cfg.MeetingIssueKey != "EDB-9071" {
 		t.Errorf("meeting key = %q, want EDB-9071", cfg.MeetingIssueKey)
@@ -59,7 +59,7 @@ func TestLoadFileOverridesAndEnvSecrets(t *testing.T) {
 	if cfg.WorkdayHours != 8 {
 		t.Errorf("workday hours = %v, want 8", cfg.WorkdayHours)
 	}
-	if cfg.Target != TargetReal {
+	if cfg.Target != TargetJira {
 		t.Errorf("target = %q, want real", cfg.Target)
 	}
 	// Secrets come from the keychain first, then env. Only assert the env
@@ -128,7 +128,7 @@ func TestLoadSelfHealsBlankRequiredFields(t *testing.T) {
 	if cfg.WebPort != 9080 || cfg.MockJiraPort != 9099 {
 		t.Errorf("ports not healed: web=%d mock=%d", cfg.WebPort, cfg.MockJiraPort)
 	}
-	if cfg.Target != TargetReal {
+	if cfg.Target != TargetJira {
 		t.Errorf("target not healed: %q", cfg.Target)
 	}
 	// Real values from the file must be preserved.
