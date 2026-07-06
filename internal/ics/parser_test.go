@@ -117,8 +117,7 @@ func TestParse_EscapedSummary(t *testing.T) {
 	}
 }
 
-func TestIsHolidayDay(t *testing.T) {
-	// All-day event with "holiday" in the title on 2026-06-17.
+func TestIsHolidayDay(t *testing.T) {	// All-day event with "holiday" in the title on 2026-06-17.
 	raw := strings.Join([]string{
 		"BEGIN:VCALENDAR",
 		"BEGIN:VEVENT",
@@ -164,5 +163,44 @@ func TestIsHolidayDay(t *testing.T) {
 	m2, _ := Parse(strings.NewReader(raw2))
 	if !IsHolidayDay(m2, day17) {
 		t.Error("holiday detection should be case-insensitive")
+	}
+}
+
+func TestParse_WindowsTimezoneNames(t *testing.T) {
+	// Outlook exports ICS with Windows timezone names like "W. Europe Standard Time".
+	// These must be resolved so events land on the correct UTC day.
+	raw := strings.Join([]string{
+		"BEGIN:VCALENDAR",
+		"BEGIN:VEVENT",
+		// W. Europe Standard Time = UTC+2 in summer: 09:00 CEST = 07:00 UTC (same day)
+		"DTSTART;TZID=W. Europe Standard Time:20260602T090000",
+		"DTEND;TZID=W. Europe Standard Time:20260602T093000",
+		"SUMMARY:Morning standup",
+		"END:VEVENT",
+		"BEGIN:VEVENT",
+		// Sri Lanka Standard Time = UTC+5:30: 14:00 IST = 08:30 UTC (same day)
+		"DTSTART;TZID=Sri Lanka Standard Time:20260603T140000",
+		"DTEND;TZID=Sri Lanka Standard Time:20260603T143000",
+		"SUMMARY:Team sync",
+		"END:VEVENT",
+		"END:VCALENDAR",
+	}, "\n")
+
+	meetings, err := Parse(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(meetings) != 2 {
+		t.Fatalf("expected 2 meetings, got %d", len(meetings))
+	}
+
+	jun2 := time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)
+	jun3 := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+
+	if TotalMinutesForDay(meetings, jun2) != 30 {
+		t.Errorf("jun2 total = %d, want 30 (W. Europe timezone resolved)", TotalMinutesForDay(meetings, jun2))
+	}
+	if TotalMinutesForDay(meetings, jun3) != 30 {
+		t.Errorf("jun3 total = %d, want 30 (Sri Lanka timezone resolved)", TotalMinutesForDay(meetings, jun3))
 	}
 }
