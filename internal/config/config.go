@@ -77,10 +77,10 @@ type Config struct {
 	ICSPath         string       `json:"icsPath"`
 	// ICSUrl is a published Outlook calendar URL (ICS format). When set, the
 	// app fetches the live calendar from this URL instead of reading ICSPath.
-	ICSUrl          string       `json:"icsUrl"`
-	MockJiraPort    int          `json:"mockJiraPort"`
-	WebPort         int          `json:"webPort"`
-	Target          string       `json:"target"`
+	ICSUrl       string `json:"icsUrl"`
+	MockJiraPort int    `json:"mockJiraPort"`
+	WebPort      int    `json:"webPort"`
+	Target       string `json:"target"`
 
 	// LogMeetingsSeparately creates one worklog per calendar meeting (using
 	// the meeting title as the comment) instead of a single aggregate worklog.

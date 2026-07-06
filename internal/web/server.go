@@ -78,8 +78,7 @@ type Server struct {
 	dayIndex    map[string]int // date -> index
 	mockClient  *jira.Client   // writes to the mock server
 	jiraClient  *jira.Client   // writes to Jira; nil when no credentials
-	activeWrite string         // "mock" | "real" — where submits currently go
-	readSource  string         // display label for where existing worklogs were read
+	activeWrite string         // "real" — where submits go
 	port        int
 	cfg         config.Config   // current config (for settings page)
 	cfgPath     string          // path to config.json (for saving)
@@ -88,21 +87,14 @@ type Server struct {
 	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
 }
 
-// New creates a Server. mockClient always writes to the mock; realClient (may be
-// nil) writes to Jira. target ("mock"/"mock-write"/"real") sets the initial
-// read-source label and active write target.
+// New creates a Server.
 func New(plans []model.DayPlan, mockClient, realClient *jira.Client, target string, port int) *Server {
-	readSource, _ := targetLabels(target)
-	activeWrite := "mock"
-	if target == "real" {
-		activeWrite = "real"
-	}
+	activeWrite := "real"
 	s := &Server{
 		dayIndex:    map[string]int{},
 		mockClient:  mockClient,
 		jiraClient:  realClient,
 		activeWrite: activeWrite,
-		readSource:  readSource,
 		port:        port,
 		pendingDays: map[string]bool{},
 	}
@@ -171,8 +163,6 @@ func (s *Server) writeClient() (*jira.Client, string, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.apiStatus)
-	mux.HandleFunc("GET /api/target", s.apiGetTarget)
-	mux.HandleFunc("PUT /api/target", s.apiPutTarget)
 	mux.HandleFunc("GET /api/config", s.apiGetConfig)
 	mux.HandleFunc("PUT /api/config", s.apiPutConfig)
 	mux.HandleFunc("POST /api/reload", s.apiReload)
@@ -690,7 +680,8 @@ func (s *Server) handleWizard(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleJiraGuide serves the Jira API token creation guide.
-func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+func (s *Server) handleJiraGuide(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(buildJiraGuideHTML()))
 }
 
@@ -819,57 +810,10 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	defer s.mu.Unlock()
 	_, write, _ := s.writeClient()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"read":          s.readSource,
 		"write":         write,
 		"activeWrite":   s.activeWrite,
 		"realAvailable": s.jiraClient != nil,
 	})
-}
-
-func (s *Server) apiGetTarget(w http.ResponseWriter, _ *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"activeWrite":   s.activeWrite,
-		"realAvailable": s.jiraClient != nil,
-	})
-}
-
-func (s *Server) apiPutTarget(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Target string `json:"target"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if body.Target != "mock" && body.Target != "real" {
-		writeErr(w, http.StatusBadRequest, `target must be "mock" or "real"`)
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if body.Target == "real" && s.jiraClient == nil {
-		writeErr(w, http.StatusBadRequest, "Jira credentials not configured; run the setup wizard")
-		return
-	}
-	s.activeWrite = body.Target
-	writeJSON(w, http.StatusOK, map[string]any{
-		"activeWrite":   s.activeWrite,
-		"realAvailable": s.jiraClient != nil,
-	})
-}
-
-// targetLabels returns human-readable read/write labels for a target string.
-func targetLabels(target string) (read, write string) {
-	switch target {
-	case "real":
-		return "Jira", "Jira"
-	case "mock-write":
-		return "Jira", "Mock Jira"
-	default: // "mock"
-		return "Mock Jira", "Mock Jira"
-	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -3187,4 +3131,3 @@ init();
 </html>`
 
 // Strings helper used in server logic.
-var _ = strings.TrimSpace

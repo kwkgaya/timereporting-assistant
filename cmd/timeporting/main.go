@@ -381,11 +381,6 @@ func runMain() {
 		WithPendingDays(pendingDates)
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
-	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))
-	fmt.Printf("   Writing to: %s\n", writeLabel(cfg.Target, cfg.MockJiraPort))
-	if cfg.Target != config.TargetJira {
-		fmt.Printf("   Mock Jira inspect → http://localhost:%d\n", cfg.MockJiraPort)
-	}
 
 	// Open the review UI in the browser shortly after the server starts.
 	// Skipped when --no-browser is set (tray app opens it instead).
@@ -398,24 +393,6 @@ func runMain() {
 
 	if err := http.ListenAndServe(addr, webSrv.Handler()); err != nil {
 		log.Fatal(err)
-	}
-}
-
-func readLabel(target string) string {
-	switch target {
-	case config.TargetJira, config.TargetMockWrite:
-		return "Real Jira (read-only)"
-	default:
-		return "Mock Jira"
-	}
-}
-
-func writeLabel(target string, mockPort int) string {
-	switch target {
-	case config.TargetJira:
-		return "Real Jira ⚠️"
-	default:
-		return fmt.Sprintf("Mock Jira (http://localhost:%d)", mockPort)
 	}
 }
 

@@ -1,82 +1,51 @@
-# timereporting-assistant
+# Timereporting Assistant
 
-Backfill and auto-generate your **Jira Cloud** worklogs from your **GitHub activity** and
-**calendar meetings** (from an exported `.ics` file), review them in a small local web UI, and
-submit them — first against a **mock Jira** so nothing touches your real timesheet until you
-explicitly approve.
+A small Windows desktop tool that **automatically fills in your Jira time reports** from your calendar meetings and Git/GitHub activity, lets you review and edit each day, then submits the worklogs to Jira with one click.
 
-> Status: MVP in progress. Goal: backfill **June 2026** worklogs (weekdays), 7h/day.
+## What it does
 
-## How it works
+For each working day it:
+1. Reads **existing Jira worklogs** (already counted toward the 7 h target)
+2. Logs **calendar meetings** first (from Outlook via published URL or exported .ics)
+3. Splits the **remaining time** across the Jira issues found in your Git commits and GitHub activity, proportional to how much you worked on each
+4. Shows you a **review UI** where you can edit every suggested row before submitting
 
-For each weekday in the target range the tool builds a **day plan** targeting **7 hours**:
+Days with no detectable activity prompt you to assign the Jira task manually.
 
-1. **Existing worklogs** already in Jira are read (read-only) and counted toward the 7h (top-up).
-2. **Meetings** from your `.ics` (excluding ones you declined) are logged first to the meeting
-   task (`EDB-9071`).
-3. The **remaining time** is split across the Jira issues found in your GitHub / local-git
-   activity, **proportional** to how much you worked on each, rounded to **30-minute** blocks
-   (the rounding is balanced so each day still sums to 7h).
-4. Activity with **no Jira key** is left **unassigned** for you to assign in the UI.
-5. **No-activity** working days are pre-filled with a highlighted 7h on the leave task
-   (`EDB-9070`) that you can accept, edit, or delete.
-6. Per-day **status**: Working / Public holiday / Full-day leave (7h -> `EDB-9070`) /
-   Half-day leave (3.5h -> `EDB-9070` + 3.5h work).
-7. All worklog start times are **12:00 UTC** (avoids timezone issues in this first version).
+## Quick start
 
-You review and edit every day in the UI, then approve. Submission targets the **mock Jira** by
-default; real Jira is only used when you explicitly switch the target.
+1. Download the installer from [Releases](https://github.com/kwkgaya/timereporting-assistant/releases)
+2. Run `TimereportingAssistant-Setup-vX.Y.Z.exe` — no admin required
+3. The tray icon appears; click **Open time report** and follow the setup wizard
 
-## Layout
+The wizard walks you through connecting your Jira account, GitHub token, calendar, and local git repos.
 
-```
-cmd/timereporting   CLI + local web review UI
-cmd/mockjira      Mock Jira server (safe write target)
-internal/config   Config loader (JSON file + env secrets)
-internal/model    Domain types
-internal/jira     Jira REST v3 client (read/write; points at mock or real)
-internal/mockjira Mock Jira server implementation
-internal/ics      ICS calendar parser
-internal/github   GitHub API + local git activity collectors
-internal/jirakey  Jira-key extraction + grouping
-internal/engine   Timesheet planning engine
-internal/web      Review UI server
-```
+## Calendar integration
+
+| Option | How |
+|---|---|
+| **Published URL** *(recommended)* | Outlook → File → Settings → Calendar → Shared calendars → Publish → copy the ICS link. The app fetches it live. |
+| **Local export** | File → Save Calendar → More Options → Full details, All dates. Upload in Settings. |
 
 ## Configuration
 
-Copy `config.example.json` to `config.json` (gitignored) and edit it. Secrets come from the
-environment, never from the file:
+All settings live in `%LOCALAPPDATA%\timereporting-assistant\config.json`.
+Secrets (API tokens) are stored in **Windows Credential Manager**, never on disk.
+The **Settings** page in the web UI covers everything without editing files.
 
-- `JIRA_API_TOKEN` — Jira Cloud API token (read-only usage until you enable writes)
-- `GITHUB_TOKEN` — GitHub personal access token (read-only)
+## Building from source
 
-## Safety
+`
+go build ./...
+go test ./...
+`
 
-- Real Jira is **read-only** until you explicitly set `"target": "real"` and confirm.
-- Secrets are read from the OS keychain or environment variables and are never written to the repo.
-- All write testing goes to the mock server.
+Requires Go 1.24+. The installer is built by CI on every release tag via .github/workflows/release.yml.
 
-## Privacy policy
+## Privacy
 
-This program does not transfer any information to other networked systems unless specifically
-requested by the user or the person installing or operating it. Specifically, it communicates only
-with the Jira and GitHub endpoints **you** configure (or the bundled local mock Jira), using
-credentials **you** provide, which are stored in your OS keychain / environment — never transmitted
-elsewhere and never committed to this repository.
-
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
-
-- **Committers and reviewers:** repository maintainers ([@kwkgaya](https://github.com/kwkgaya)).
-- **Approvers:** repository owner ([@kwkgaya](https://github.com/kwkgaya)).
-
-Every signed release is built by the project's CI from source in this repository and manually
-approved for signing.
+The app communicates only with the Jira and GitHub endpoints you configure, using credentials you provide. No data is sent anywhere else.
 
 ## License
 
 MIT
-
