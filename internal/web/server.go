@@ -180,10 +180,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/rows/{idx}/submit", s.apiSubmitRow)
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
-	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
-	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
-	mux.HandleFunc("POST /api/upload/ics", s.apiUploadICS)
-	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /guide/calendar-url", s.handleCalendarGuide)
 	mux.HandleFunc("GET /wizard", s.handleWizard)
@@ -205,7 +201,6 @@ type configView struct {
 	LocalRepos     []string `json:"localRepos"`
 	GitAuthors     []string `json:"gitAuthors"`
 	GitHubUsername string   `json:"githubUsername"`
-	ICSPath        string   `json:"icsPath"`
 	ICSUrl         string   `json:"icsUrl,omitempty"`
 	MockJiraPort   int      `json:"mockJiraPort"`
 	WebPort        int      `json:"webPort"`
@@ -230,7 +225,6 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 		LocalRepos:            cfg.LocalRepos,
 		GitAuthors:            cfg.GitAuthors,
 		GitHubUsername:        cfg.GitHub.Username,
-		ICSPath:               cfg.ICSPath,
 		MockJiraPort:          cfg.MockJiraPort,
 		WebPort:               cfg.WebPort,
 		Target:                cfg.Target,
@@ -275,10 +269,8 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	if v.GitHubUsername != "" {
 		s.cfg.GitHub.Username = v.GitHubUsername
 	}
-	if v.ICSPath != "" {
-		s.cfg.ICSPath = v.ICSPath
-	}
-	s.cfg.ICSUrl = v.ICSUrl // may be empty (to clear it)
+	// ICSUrl may be empty (to clear it).
+	s.cfg.ICSUrl = v.ICSUrl
 	if v.MockJiraPort > 0 {
 		s.cfg.MockJiraPort = v.MockJiraPort
 	}
@@ -1655,39 +1647,54 @@ a{color:#0052cc}
 </div>
 
 <div class="card" id="step-5" style="display:none">
-  <div class="step-label">Step 5 of 6</div>
-  <h2>Local repos &amp; calendar</h2>
-  <p class="subtitle">Where to find your local git repositories and meeting data.</p>
+  <div class="step-label">Step 5 of 8</div>
+  <h2>Local git repositories</h2>
+  <p class="subtitle">Where to find your local git clones.</p>
   <label>Git repo paths * (one per line)</label>
   <textarea id="w-repos" placeholder="C:\work\project-one&#10;C:\work\project-two" oninput="clearErr('err-5')"></textarea>
   <label>Your git author email(s)</label>
   <input type="text" id="w-authors" placeholder="you@example.com">
   <div class="hint">Filters commits by author. Comma-separated if you have more than one email.</div>
-  <label>Outlook calendar — published URL <span style="font-size:.78rem;font-weight:400;color:#0052cc">(recommended)</span></label>
-  <p style="margin:0 0 8px"><a href="/guide/calendar-url" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to get the published calendar URL →</a></p>
-  <input type="text" id="w-icsUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics">
-  <div class="hint">The app will always fetch your live calendar from this URL — no need to re-export.</div>
-  <label>Or use a local .ics export file</label>
-  <div class="input-row" style="margin-bottom:4px">
-    <input type="text" id="w-ics" placeholder="C:\Users\you\Downloads\calendar.ics" style="margin-bottom:0">
-    <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:38px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
-      📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'w-ics')">
-    </label>
+  <div class="error" id="err-5"></div>
+  <div class="btn-row">
+    <button class="btn-secondary" onclick="goTo(4)">← Back</button>
+    <button class="btn-primary" onclick="saveRepos()">Next →</button>
   </div>
-  <div class="hint" style="margin-top:8px">In Outlook: <strong>File → Save Calendar → More Options → Detail: Full details, Date range: All</strong>. Make sure to include tentative meetings — if you only export accepted events, days with unaccepted invites will show no meetings. Meetings are logged first before other tasks.</div>
-  <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change review UI port (default 9080)</summary>
+</div>
+
+<div class="card" id="step-6" style="display:none">
+  <div class="step-label">Step 6 of 8</div>
+  <h2>Calendar</h2>
+  <p class="subtitle">Connect your Outlook calendar so meetings are logged automatically.</p>
+  <label>Published calendar URL *</label>
+  <p style="margin:0 0 8px"><a href="/guide/calendar-url" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to get the published calendar URL →</a></p>
+  <input type="text" id="w-icsUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics" oninput="clearErr('err-6')">
+  <div class="hint" style="margin-top:6px">Publish your calendar in Outlook (read-only link) so the app always reads live events. You can skip this and add it later in Settings.</div>
+  <div class="error" id="err-6"></div>
+  <div class="btn-row">
+    <button class="btn-secondary" onclick="goTo(5)">← Back</button>
+    <button class="btn-primary" onclick="saveCalendar()">Next →</button>
+    <button class="btn-skip" onclick="goTo(7)">Skip for now</button>
+  </div>
+</div>
+
+<div class="card" id="step-7" style="display:none">
+  <div class="step-label">Step 7 of 8</div>
+  <h2>Advanced settings</h2>
+  <p class="subtitle">Defaults work for most people — adjust only if needed.</p>
+  <details style="margin-bottom:12px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Change review UI port (default 9080)</summary>
   <div style="margin-top:10px">
     <label>Review UI port</label>
     <input type="number" id="w-webPort" value="9080" min="1024" max="65535">
   </div>
   </details>
-  <div style="margin-top:14px;padding:12px 14px;background:#f4f5f7;border-radius:6px;border:1px solid #dfe1e6">
+  <div style="padding:12px 14px;background:#f4f5f7;border-radius:6px;border:1px solid #dfe1e6;margin-bottom:12px">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.88rem">
       <input type="checkbox" id="w-logMeetingsSeparately" checked style="width:16px;height:16px">
       Log each calendar meeting separately (using its title as the comment)
     </label>
   </div>
-  <div style="margin-top:10px;padding:12px 14px;background:#f4f5f7;border-radius:6px">
+  <div style="padding:12px 14px;background:#f4f5f7;border-radius:6px">
     <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:pointer">
       <input type="checkbox" id="w-autoUpdate" checked style="width:16px;height:16px">
       Keep the app up to date automatically
@@ -1697,15 +1704,14 @@ a{color:#0052cc}
       Include beta (prerelease) versions
     </label>
   </div>
-  <div class="error" id="err-5"></div>
-  <div class="btn-row">
-    <button class="btn-secondary" onclick="goTo(4)">← Back</button>
-    <button class="btn-primary" onclick="saveReposAndFinish()">Save &amp; build plans →</button>
+  <div class="btn-row" style="margin-top:16px">
+    <button class="btn-secondary" onclick="goTo(6)">← Back</button>
+    <button class="btn-primary" onclick="saveAdvancedAndFinish()">Save &amp; build plans →</button>
   </div>
 </div>
 
-<div class="card" id="step-6" style="display:none">
-  <div class="step-label">Step 6 of 6</div>
+<div class="card" id="step-8" style="display:none">
+  <div class="step-label">Step 8 of 8</div>
   <div id="build-view">
     <div class="done-icon">⏳</div>
     <h2 style="text-align:center">Building your time report plans…</h2>
@@ -1725,7 +1731,7 @@ a{color:#0052cc}
 
 </main>
 <script>
-const TOTAL=6;
+const TOTAL=8;
 function goTo(n){
   document.querySelectorAll('.card').forEach(c=>c.style.display='none');
   document.getElementById('step-'+n).style.display='block';
@@ -1790,13 +1796,23 @@ async function saveGitHub(){
     goTo(5);
   }catch(e){showErr('err-4','❌ '+e.message);}
 }
-async function saveReposAndFinish(){
+function saveRepos(){
   const repos=document.getElementById('w-repos').value.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!repos.length){showErr('err-5','Enter at least one repository path.');return;}
-  const authors=document.getElementById('w-authors').value.split(',').map(s=>s.trim()).filter(Boolean);
-  const ics=document.getElementById('w-ics').value.trim();
-  const icsUrl=document.getElementById('w-icsUrl').value.trim();
   goTo(6);
+}
+async function saveCalendar(){
+  const icsUrl=document.getElementById('w-icsUrl').value.trim();
+  if(icsUrl){
+    try{ await api('PUT','/config',{icsUrl}); }catch(e){ showErr('err-6','❌ '+e.message); return; }
+  }
+  goTo(7);
+}
+async function saveAdvancedAndFinish(){
+  const repos=document.getElementById('w-repos').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const authors=document.getElementById('w-authors').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const icsUrl=document.getElementById('w-icsUrl').value.trim();
+  goTo(8);
   document.getElementById('build-view').style.display='block';
   document.getElementById('done-view').style.display='none';
   document.getElementById('build-fill').style.width='0%';
@@ -1804,7 +1820,7 @@ async function saveReposAndFinish(){
   document.getElementById('build-count').textContent='';
   try{
     await api('PUT','/config',{
-      localRepos:repos, gitAuthors:authors, icsPath:ics, icsUrl:icsUrl,
+      localRepos:repos, gitAuthors:authors, icsUrl:icsUrl,
       workdayHours:7, target:'real',
       webPort:+(document.getElementById('w-webPort').value||9080),
       autoUpdate:document.getElementById('w-autoUpdate').checked,
@@ -1843,7 +1859,6 @@ function startBuildStream(){
   });
   es.addEventListener('error',ev=>{
     if(finished)return;
-    // A custom server error event carries data; transient connection blips do not.
     if(ev.data){
       finished=true; es.close();
       let msg='Could not build plans';
@@ -1851,20 +1866,6 @@ function startBuildStream(){
       showBuildError(msg);
     }
   });
-}
-async function uploadICS(input, targetId) {
-  if (!input.files || !input.files[0]) return;
-  const fd = new FormData();
-  fd.append('ics', input.files[0]);
-  try {
-    const r = await fetch('/api/upload/ics', {method:'POST', body:fd});
-    const d = await r.json();
-    if (r.ok) {
-      document.getElementById(targetId).value = d.path;
-      toast('Calendar file saved: '+d.path);
-    } else { toast(d.error||'Upload failed', true); }
-  } catch(e) { toast('Upload failed: '+e.message, true); }
-  input.value = '';
 }
 
 // Pre-fill fields from any existing config so returning users don't retype.
@@ -1879,7 +1880,6 @@ async function prefill(){
     set('w-ghUser',c.githubUsername);
     if(c.localRepos&&c.localRepos.length)document.getElementById('w-repos').value=c.localRepos.join('\n');
     if(c.gitAuthors&&c.gitAuthors.length)document.getElementById('w-authors').value=c.gitAuthors.join(', ');
-    set('w-ics',c.icsPath);
     set('w-icsUrl',c.icsUrl);
     if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
     if(typeof c.autoUpdate==='boolean')document.getElementById('w-autoUpdate').checked=c.autoUpdate;
@@ -1920,16 +1920,6 @@ func buildCalendarGuideHTML() string {
   <a href="/settings">← Back to Settings</a>
 </header>
 <main>
-<section>
-  <h2>Why use a URL instead of a file?</h2>
-  <p class="subtitle">
-    A published calendar URL means the app always reads your <strong>live calendar</strong>
-    without you needing to re-export and re-upload an .ics file.
-    Once configured, new meetings appear automatically the next time a day plan is built.
-  </p>
-  <p style="font-size:.85rem;color:#42526e">The URL is read-only — publishing only shares your calendar events; nobody can edit them.</p>
-</section>
-
 <section>
   <h2>Step-by-step</h2>
 
@@ -2139,21 +2129,11 @@ button.secondary:hover{background:#f4f5f7}
     <input type="text" id="gitAuthors" placeholder="you@example.com, you@work.com">
   </div>
   <div class="field">
-    <label>Calendar — published URL <span style="font-size:.78rem;font-weight:400;color:#0052cc">(recommended)</span>
+    <label>Calendar — published URL
       <a href="/guide/calendar-url" target="_blank" style="font-size:.78rem;margin-left:8px">📖 How to get the URL →</a>
     </label>
     <input type="text" id="icsUrl" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics">
     <div class="hint" style="margin-top:4px">Paste the published ICS link from Outlook. The app fetches your live calendar automatically — no need to re-export.</div>
-  </div>
-  <div class="field">
-    <label>Calendar export (.ics file path) <span style="font-size:.78rem;font-weight:400;color:#6b778c">— or use the URL above</span></label>
-    <div style="display:flex;gap:8px;align-items:center">
-      <input type="text" id="icsPath" placeholder="C:\Users\you\Downloads\calendar.ics" style="flex:1;margin-bottom:0">
-      <label style="display:inline-flex;align-items:center;background:#f4f5f7;border:1px solid #dfe1e6;border-radius:4px;padding:0 12px;cursor:pointer;height:36px;font-weight:400;font-size:.83rem;white-space:nowrap;margin:0">
-        📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'icsPath')">
-      </label>
-    </div>
-    <div class="hint" style="margin-top:6px">In Outlook: <strong>File → Save Calendar → More Options → Detail: Full details, Date range: All</strong>. Include tentative meetings — events you haven't accepted may be missing from a default export.</div>
   </div>
 </section>
 
@@ -2242,7 +2222,6 @@ async function loadConfig() {
     document.getElementById('meetingKey').value = c.meetingKey||'';
     document.getElementById('leaveKey').value = c.leaveKey||'';
     document.getElementById('githubUsername').value = c.githubUsername||'';
-    document.getElementById('icsPath').value = c.icsPath||'';
     document.getElementById('icsUrl').value = c.icsUrl||'';
     document.getElementById('localRepos').value = (c.localRepos||[]).join('\n');
     document.getElementById('gitAuthors').value = (c.gitAuthors||[]).join(', ');
@@ -2274,7 +2253,6 @@ async function saveConfig() {
       meetingKey: document.getElementById('meetingKey').value.trim(),
       leaveKey: document.getElementById('leaveKey').value.trim(),
       githubUsername: document.getElementById('githubUsername').value.trim(),
-      icsPath: document.getElementById('icsPath').value.trim(),
       icsUrl: document.getElementById('icsUrl').value.trim(),
       localRepos: repos,
       gitAuthors: authors,
@@ -2330,21 +2308,6 @@ async function saveAndRebuild() {
     a.href = '/'; a.textContent = 'Go to time report →';
     document.getElementById('cfg-msg').appendChild(a);
   } catch(e) { msg.textContent = '❌ '+e.message; msg.style.color='#de350b'; }
-}
-
-async function uploadICS(input, targetId) {
-  if (!input.files || !input.files[0]) return;
-  const fd = new FormData();
-  fd.append('ics', input.files[0]);
-  try {
-    const r = await fetch('/api/upload/ics', {method:'POST', body:fd});
-    const d = await r.json();
-    if (r.ok) {
-      document.getElementById(targetId).value = d.path;
-      toast('Calendar file saved: '+d.path);
-    } else { toast(d.error||'Upload failed', true); }
-  } catch(e) { toast('Upload failed: '+e.message, true); }
-  input.value = '';
 }
 
 loadConfig(); loadCredStatus();
@@ -3019,6 +2982,7 @@ async function deleteExisting(date, id) {
 }
 
 async function clonePrev(date) {
+  showOverlay('Cloning from previous day…');
   try {
     const updated = await api('POST','/days/'+date+'/clone-previous');
     const i = days.findIndex(d=>d.date===date);
@@ -3027,9 +2991,11 @@ async function clonePrev(date) {
     renderList();
     toast('Cloned from previous day.');
   } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
 }
 
 async function submitRow(date, rowIdx) {
+  showOverlay('Submitting…');
   try {
     const res = await api('POST','/days/'+date+'/rows/'+rowIdx+'/submit');
     const i = days.findIndex(d=>d.date===date);
@@ -3038,15 +3004,16 @@ async function submitRow(date, rowIdx) {
     renderList();
     toast('Logged to '+res.target+'.');
   } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
 }
 
 async function submitDay(date) {
+  showOverlay('Submitting all worklogs…');
   try {
     const res = await api('POST','/days/'+date+'/submit',{dryRun:false});
     const n = (res.submitted||[]).length;
     toast('Submitted: '+n+' worklog(s) to '+res.target+'.');
     if (res.day) {
-      // Server returns the updated day with worklogs moved to Existing.
       const i = days.findIndex(d=>d.date===date);
       if (i>=0) days[i] = res.day;
       renderDetail(res.day);
@@ -3055,6 +3022,7 @@ async function submitDay(date) {
       await refresh(date);
     }
   } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
 }
 
 async function refresh(date) {
