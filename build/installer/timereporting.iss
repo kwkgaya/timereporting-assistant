@@ -84,3 +84,25 @@ Filename: "taskkill"; Parameters: "/f /im timeporting.exe"; \
   Flags: runhidden skipifdoesntexist
 Filename: "taskkill"; Parameters: "/f /im mockjira.exe"; \
   Flags: runhidden skipifdoesntexist
+
+[Code]
+// KillIfRunning force-terminates a process by image name (no error if absent).
+procedure KillIfRunning(const ExeName: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ' + ExeName, '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Terminate the app's processes before the installer scans for files in use.
+// Running this in InitializeSetup means nothing holds our files open, so the
+// "Preparing to Install / applications are using files" page never appears —
+// this also makes silent auto-updates seamless.
+function InitializeSetup(): Boolean;
+begin
+  KillIfRunning('tray.exe');
+  KillIfRunning('timeporting.exe');
+  KillIfRunning('mockjira.exe');
+  Result := True;
+end;
