@@ -2761,7 +2761,13 @@ function addRowWithKey(key) {
   const day = getDayLocal(currentDate);
   if (!day) return;
   day.suggested = day.suggested || [];
-  day.suggested.push({issueKey:key, minutes:30, comment:'', category:'manual'});
+  // Default time = remaining minutes needed to reach 7h target (420 min),
+  // capped at 30 min minimum and rounded to the nearest 30-min block.
+  const existMins = (day.existing||[]).reduce((a,w)=>a+w.minutes,0);
+  const suggMins = (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
+  const remaining = Math.max(30, 420 - existMins - suggMins);
+  const defaultMins = Math.round(remaining / 30) * 30 || 30;
+  day.suggested.push({issueKey:key, minutes:defaultMins, comment:'', category:'manual'});
   saveSuggested(currentDate, day.suggested);
   renderDetail(day);
   renderList();
