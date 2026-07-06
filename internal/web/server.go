@@ -81,10 +81,10 @@ type Server struct {
 	activeWrite string         // "mock" | "real" — where submits currently go
 	readSource  string         // display label for where existing worklogs were read
 	port        int
-	cfg         config.Config // current config (for settings page)
-	cfgPath     string        // path to config.json (for saving)
-	planBuilder PlanBuilder   // called on reload to rebuild day plans
-	dayBuilder  DayBuilder    // called to build a single day on demand
+	cfg         config.Config   // current config (for settings page)
+	cfgPath     string          // path to config.json (for saving)
+	planBuilder PlanBuilder     // called on reload to rebuild day plans
+	dayBuilder  DayBuilder      // called to build a single day on demand
 	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
 }
 

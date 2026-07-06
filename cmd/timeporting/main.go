@@ -215,6 +215,10 @@ func runMain() {
 			report(i, total, "Scanning activity for "+dk+"…")
 			ex := existing[dk]
 			mm := ics.TotalMinutesForDay(meetings, day)
+			status := model.StatusWorking
+			if ics.IsHolidayDay(meetings, day) {
+				status = model.StatusHoliday
+			}
 			var acts []model.Activity
 			la, _ := gc.CollectForDay(day)
 			acts = append(acts, la...)
@@ -222,7 +226,7 @@ func runMain() {
 				ga, _ := ghc.CollectForDay(day)
 				acts = append(acts, ga...)
 			}
-			ps = append(ps, engine.BuildDayPlan(ec, day, model.StatusWorking, ex, mm, acts))
+			ps = append(ps, engine.BuildDayPlan(ec, day, status, ex, mm, acts))
 		}
 		report(total, total, "Finalizing…")
 		return ps, mb, rb, nil
@@ -248,14 +252,18 @@ func runMain() {
 	if stubRC != mockClient {
 		if ex, err := stubRC.ExistingWorklogsByDay(cfg.Jira.Email, startDate, endDate); err == nil {
 			for dk, wls := range ex {
-				for i := range wls { wls[i].Source = "real" }
+				for i := range wls {
+					wls[i].Source = "real"
+				}
 				stubExisting[dk] = append(stubExisting[dk], wls...)
 			}
 		}
 	}
 	if ex, err := mockClient.ExistingWorklogsByDay("", startDate, endDate); err == nil {
 		for dk, wls := range ex {
-			for i := range wls { wls[i].Source = "mock" }
+			for i := range wls {
+				wls[i].Source = "mock"
+			}
 			stubExisting[dk] = append(stubExisting[dk], wls...)
 		}
 	}
@@ -321,6 +329,10 @@ func runMain() {
 		dk := day.Format("2006-01-02")
 		ex := existing[dk]
 		mm := ics.TotalMinutesForDay(meetings, day)
+		dayStatus := model.StatusWorking
+		if ics.IsHolidayDay(meetings, day) {
+			dayStatus = model.StatusHoliday
+		}
 		var acts []model.Activity
 		la, _ := gc.CollectForDay(day)
 		acts = append(acts, la...)
@@ -328,7 +340,7 @@ func runMain() {
 			ga, _ := ghc.CollectForDay(day)
 			acts = append(acts, ga...)
 		}
-		return engine.BuildDayPlan(ec, day, model.StatusWorking, ex, mm, acts), nil
+		return engine.BuildDayPlan(ec, day, dayStatus, ex, mm, acts), nil
 	}
 
 	// ── Web review UI ──────────────────────────────────────────────────────

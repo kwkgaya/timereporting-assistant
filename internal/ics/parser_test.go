@@ -116,3 +116,53 @@ func TestParse_EscapedSummary(t *testing.T) {
 		t.Errorf("summary = %q", meetings[0].Summary)
 	}
 }
+
+func TestIsHolidayDay(t *testing.T) {
+	// All-day event with "holiday" in the title on 2026-06-17.
+	raw := strings.Join([]string{
+		"BEGIN:VCALENDAR",
+		"BEGIN:VEVENT",
+		"DTSTART:20260617",
+		"DTEND:20260618",
+		"SUMMARY:Norway Constitution Day (Public Holiday)",
+		"END:VEVENT",
+		// Regular meeting on the same day — should not trigger holiday.
+		"BEGIN:VEVENT",
+		"DTSTART:20260617T090000Z",
+		"DTEND:20260617T100000Z",
+		"SUMMARY:Standup",
+		"END:VEVENT",
+		// All-day event WITHOUT holiday in the title.
+		"BEGIN:VEVENT",
+		"DTSTART:20260618",
+		"DTEND:20260619",
+		"SUMMARY:Team off-site",
+		"END:VEVENT",
+		"END:VCALENDAR",
+	}, "\n")
+
+	meetings, err := Parse(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	day17 := time.Date(2026, 6, 17, 0, 0, 0, 0, time.UTC)
+	day18 := time.Date(2026, 6, 18, 0, 0, 0, 0, time.UTC)
+	day19 := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
+
+	if !IsHolidayDay(meetings, day17) {
+		t.Error("day with all-day 'Public Holiday' event should be detected as holiday")
+	}
+	if IsHolidayDay(meetings, day18) {
+		t.Error("day with all-day non-holiday event should NOT be detected as holiday")
+	}
+	if IsHolidayDay(meetings, day19) {
+		t.Error("day with no events should NOT be a holiday")
+	}
+	// Case-insensitive check.
+	raw2 := "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20260617\nDTEND:20260618\nSUMMARY:HOLIDAY - closed\nEND:VEVENT\nEND:VCALENDAR"
+	m2, _ := Parse(strings.NewReader(raw2))
+	if !IsHolidayDay(m2, day17) {
+		t.Error("holiday detection should be case-insensitive")
+	}
+}

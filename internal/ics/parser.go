@@ -98,6 +98,17 @@ func TotalMinutesForDay(all []model.Meeting, day time.Time) int {
 	return total
 }
 
+// IsHolidayDay reports whether any all-day event on day has "holiday" in its
+// summary (case-insensitive). An all-day event spans an entire 24-hour period.
+func IsHolidayDay(all []model.Meeting, day time.Time) bool {
+	for _, m := range MeetingsForDay(all, day) {
+		if m.Minutes() >= 24*60 && strings.Contains(strings.ToLower(m.Summary), "holiday") {
+			return true
+		}
+	}
+	return false
+}
+
 // unfold joins continuation lines (RFC 5545 §3.1: lines beginning with
 // SPACE or TAB are continuations of the preceding line).
 func unfold(r io.Reader) ([]string, error) {
