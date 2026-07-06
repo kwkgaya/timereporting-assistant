@@ -1585,7 +1585,7 @@ a{color:#0052cc}
       📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'w-ics')">
     </label>
   </div>
-  <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged first before other tasks.</div>
+  <div class="hint">In Outlook: <strong>File → Save Calendar → More Options → Detail: Full details, Date range: All</strong>. Make sure to include tentative meetings — if you only export accepted events, days with unaccepted invites will show no meetings. Meetings are logged first before other tasks.</div>
   <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.83rem;color:#6b778c">Advanced: change review UI port (default 9080)</summary>
   <div style="margin-top:10px">
     <label>Review UI port</label>
@@ -1969,7 +1969,7 @@ button.secondary:hover{background:#f4f5f7}
         📂 Browse<input type="file" accept=".ics" style="display:none" onchange="uploadICS(this,'icsPath')">
       </label>
     </div>
-    <div class="hint">Export from Outlook: File → Save Calendar. Meetings are logged to the meeting task key above.</div>
+    <div class="hint">In Outlook: <strong>File → Save Calendar → More Options → Detail: Full details, Date range: All</strong>. Include tentative meetings — events you haven't accepted may be missing from a default export.</div>
   </div>
 </section>
 
