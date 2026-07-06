@@ -8,10 +8,33 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/keychain"
 )
+
+// DefaultPath returns the canonical location of config.json for the current
+// user: %LOCALAPPDATA%\timereporting-assistant\config.json on Windows, or
+// ~/.config/timereporting-assistant/config.json elsewhere. All binaries use
+// this so they read and write the same persisted configuration.
+func DefaultPath() string {
+	var dir string
+	if runtime.GOOS == "windows" {
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			dir = filepath.Join(local, "timereporting-assistant")
+		}
+	}
+	if dir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, ".config", "timereporting-assistant")
+		} else {
+			dir = "."
+		}
+	}
+	return filepath.Join(dir, "config.json")
+}
 
 // Target selects where worklogs are submitted.
 const (

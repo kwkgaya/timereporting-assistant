@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/applog"
+	"github.com/kwkgaya/timereporting-assistant/internal/config"
 	"github.com/kwkgaya/timereporting-assistant/internal/trayapp"
 )
 
@@ -19,7 +20,7 @@ import (
 var version = "dev"
 
 func main() {
-	cfgPath := flag.String("config", "config.json", "path to config JSON file")
+	cfgPath := flag.String("config", config.DefaultPath(), "path to config JSON file")
 	autoStartFlag := flag.String("autostart", "", "register|unregister autostart")
 	flag.Parse()
 

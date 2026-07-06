@@ -346,9 +346,16 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if body.Token == "" {
-		writeErr(w, http.StatusBadRequest, "token required")
-		return
+	// If no token is supplied, reuse the one already saved in the keychain.
+	// This lets returning users re-run the wizard without re-pasting their token.
+	token := body.Token
+	if token == "" {
+		if cred, err := keychain.Load(keychain.JiraTarget); err == nil && cred.Secret != "" {
+			token = cred.Secret
+		} else {
+			writeErr(w, http.StatusBadRequest, "token required")
+			return
+		}
 	}
 	// Use baseUrl from body if provided; fall back to saved config.
 	s.mu.Lock()
@@ -365,12 +372,12 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "Jira base URL is required — fill it in above")
 		return
 	}
-	apiBase, err := validateJiraToken(baseURL, email, body.Token)
+	apiBase, err := validateJiraToken(baseURL, email, token)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "token validation failed: "+err.Error())
 		return
 	}
-	if err := keychain.Store(keychain.JiraTarget, email, body.Token); err != nil {
+	if err := keychain.Store(keychain.JiraTarget, email, token); err != nil {
 		writeErr(w, http.StatusInternalServerError, "keychain store: "+err.Error())
 		return
 	}
@@ -379,8 +386,8 @@ func (s *Server) apiSetJiraCredentials(w http.ResponseWriter, r *http.Request) {
 	s.cfg.Jira.BaseURL = baseURL
 	s.cfg.Jira.APIBase = apiBase
 	s.cfg.Jira.Email = email
-	s.cfg.JiraAPIToken = body.Token
-	s.realClient = jira.NewClient(apiBase, email, body.Token)
+	s.cfg.JiraAPIToken = token
+	s.realClient = jira.NewClient(apiBase, email, token)
 	cfgPath := s.cfgPath
 	cfg := s.cfg
 	s.mu.Unlock()
@@ -1257,7 +1264,10 @@ a{color:#0052cc}
     <a href="https://id.atlassian.com/manage-profile" target="_blank">id.atlassian.com/manage-profile</a>.
     It may differ from your work email.
   </p>
-  <label>API token *</label>
+  <div id="jira-saved-note" style="display:none;font-size:.85rem;background:#e3fcef;border:1px solid #abf5d1;border-radius:4px;padding:8px 12px;margin-bottom:12px">
+    ✓ A Jira token is already saved on this computer. Leave the box below empty to <strong>keep using it</strong>, or paste a new token to replace it.
+  </div>
+  <label>API token <span id="jira-token-req">*</span></label>
   <div class="input-row">
     <input type="password" id="w-jiraToken" placeholder="Paste token here" oninput="clearErr('err-3')">
     <button class="show-btn" onclick="togglePwd('w-jiraToken',this)">Show</button>
@@ -1277,6 +1287,9 @@ a{color:#0052cc}
   <p style="margin:0 0 14px"><a href="/guide/github-token" target="_blank" style="display:inline-block;background:#e9f2ff;color:#0052cc;padding:6px 14px;border-radius:4px;font-size:.85rem;font-weight:600;text-decoration:none">📖 How to create a GitHub token →</a></p>
   <label>GitHub username</label>
   <input type="text" id="w-ghUser" placeholder="your-work-github-username">
+  <div id="gh-saved-note" style="display:none;font-size:.85rem;background:#e3fcef;border:1px solid #abf5d1;border-radius:4px;padding:8px 12px;margin:10px 0">
+    ✓ A GitHub token is already saved. Leave the box below empty to <strong>keep using it</strong>, or paste a new token to replace it.
+  </div>
   <label>GitHub token</label>
   <div class="input-row">
     <input type="password" id="w-ghToken" placeholder="github_pat_..." oninput="clearErr('err-4')">
@@ -1369,7 +1382,8 @@ function validateStep2(){
 }
 async function validateAndSaveJira(){
   const token=document.getElementById('w-jiraToken').value.trim();
-  if(!token){showErr('err-3','Paste your token first.');return;}
+  const hasSaved=document.getElementById('jira-saved-note').style.display!=='none';
+  if(!token&&!hasSaved){showErr('err-3','Paste your token first.');return;}
   const baseUrl=document.getElementById('w-jiraBaseUrl').value.trim();
   const email=document.getElementById('w-jiraEmail').value.trim();
   const btn=document.getElementById('btn-validate');
@@ -1380,6 +1394,7 @@ async function validateAndSaveJira(){
       meetingKey:document.getElementById('w-meetingKey').value.trim()||'EDB-9071',
       leaveKey:document.getElementById('w-leaveKey').value.trim()||'EDB-9070',
     });
+    // Empty token => server reuses the token already saved in the keychain.
     await api('POST','/credentials/jira',{baseUrl,email,token});
     goTo(4);
   }catch(e){showErr('err-3','❌ '+e.message);}
@@ -1388,11 +1403,15 @@ async function validateAndSaveJira(){
 async function saveGitHub(){
   const user=document.getElementById('w-ghUser').value.trim();
   const token=document.getElementById('w-ghToken').value.trim();
-  if(user&&!token){showErr('err-4','Enter a token for the username, or skip.');return;}
+  const hasSaved=document.getElementById('gh-saved-note').style.display!=='none';
+  if(user&&!token&&!hasSaved){showErr('err-4','Enter a token for the username, or skip.');return;}
   try{
     if(token){
       await api('PUT','/config',{githubUsername:user});
       await api('POST','/credentials/github',{token});
+    }else if(user){
+      // Keep the existing token; just update the username.
+      await api('PUT','/config',{githubUsername:user});
     }
     goTo(5);
   }catch(e){showErr('err-4','❌ '+e.message);}
@@ -1449,6 +1468,19 @@ async function prefill(){
     if(c.webPort)document.getElementById('w-webPort').value=c.webPort;
     if(c.mockJiraPort)document.getElementById('w-mockPort').value=c.mockJiraPort;
   }catch(e){/* first run: nothing to pre-fill */}
+  // Detect already-saved tokens so the user can reuse them without re-pasting.
+  try{
+    const s=await api('GET','/credentials/status');
+    if(s.jira&&s.jira.indexOf('set')===0){
+      document.getElementById('jira-saved-note').style.display='block';
+      document.getElementById('jira-token-req').style.display='none';
+      document.getElementById('w-jiraToken').placeholder='Leave empty to keep the saved token';
+    }
+    if(s.github&&s.github.indexOf('set')===0){
+      document.getElementById('gh-saved-note').style.display='block';
+      document.getElementById('w-ghToken').placeholder='Leave empty to keep the saved token';
+    }
+  }catch(e){/* status unavailable: fall back to requiring a token */}
 }
 
 prefill();
