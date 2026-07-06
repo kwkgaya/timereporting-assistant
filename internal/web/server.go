@@ -31,6 +31,9 @@ type DayView struct {
 	Unassigned []UnassignedView `json:"unassigned"` // activity with no Jira key
 	Notes      []string         `json:"notes"`
 	Submitted  bool             `json:"submitted"` // true after a successful Jira write
+	// Pending is true when the day has only stub data (existing Jira worklogs);
+	// the full plan (git/GitHub activity) is built on demand when navigated to.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // UnassignedView is an activity item that has no Jira key yet.
@@ -82,6 +85,7 @@ type Server struct {
 	cfgPath     string        // path to config.json (for saving)
 	planBuilder PlanBuilder   // called on reload to rebuild day plans
 	dayBuilder  DayBuilder    // called to build a single day on demand
+	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
 }
 
 // New creates a Server. mockClient always writes to the mock; realClient (may be
@@ -100,6 +104,7 @@ func New(plans []model.DayPlan, mockClient, realClient *jira.Client, target stri
 		activeWrite: activeWrite,
 		readSource:  readSource,
 		port:        port,
+		pendingDays: map[string]bool{},
 	}
 	for _, p := range plans {
 		key := p.Date.Format("2006-01-02")
@@ -132,6 +137,21 @@ func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
 func (s *Server) WithDayBuilder(fn DayBuilder) *Server {
 	s.mu.Lock()
 	s.dayBuilder = fn
+	s.mu.Unlock()
+	return s
+}
+
+// WithPendingDays marks the given dates as stub plans that need a full build
+// when the user first navigates to them. It also sets Pending=true on the
+// stored DayViews so the client knows to trigger the build.
+func (s *Server) WithPendingDays(dates []string) *Server {
+	s.mu.Lock()
+	for _, d := range dates {
+		s.pendingDays[d] = true
+		if idx, ok := s.dayIndex[d]; ok {
+			s.days[idx].Pending = true
+		}
+	}
 	s.mu.Unlock()
 	return s
 }
@@ -372,6 +392,7 @@ func (s *Server) apiReloadStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyPlans swaps in a freshly built set of day plans and updates the clients.
+// A full rebuild (from buildPlans) clears all pending stubs.
 func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.Client) {
 	newDays := make([]DayView, 0, len(plans))
 	newIndex := map[string]int{}
@@ -385,6 +406,7 @@ func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.
 	s.mu.Lock()
 	s.days = newDays
 	s.dayIndex = newIndex
+	s.pendingDays = map[string]bool{} // full rebuild clears all stubs
 	if mockClient != nil {
 		s.mockClient = mockClient
 	}
@@ -863,38 +885,43 @@ func (s *Server) apiGetDay(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		d = s.days[idx]
 	}
+	isPending := s.pendingDays[date]
 	builder := s.dayBuilder
 	cfg := s.cfg
 	s.mu.Unlock()
 
-	if !ok {
-		// Date is outside the initially loaded range — build it on demand.
-		if builder == nil {
-			writeErr(w, http.StatusNotFound, "date not found: "+date)
-			return
+	// Build the full plan if this is a stub or an out-of-range date.
+	if (ok && isPending && builder != nil) || (!ok && builder != nil) {
+		if !ok {
+			t, err := time.Parse("2006-01-02", date)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "invalid date: "+date)
+				return
+			}
+			if !model.IsWeekday(t) {
+				writeErr(w, http.StatusBadRequest, "not a weekday: "+date)
+				return
+			}
 		}
-		t, err := time.Parse("2006-01-02", date)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid date: "+date)
-			return
-		}
-		if !model.IsWeekday(t) {
-			writeErr(w, http.StatusBadRequest, "not a weekday: "+date)
-			return
-		}
+		t, _ := time.Parse("2006-01-02", date)
 		plan, err := builder(cfg, t)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "build day: "+err.Error())
 			return
 		}
 		d = planToView(plan)
-		// Cache it so subsequent edits/submits work.
 		s.mu.Lock()
-		if _, exists := s.dayIndex[date]; !exists {
+		if existing, exists := s.dayIndex[date]; exists {
+			s.days[existing] = d
+		} else {
 			s.dayIndex[date] = len(s.days)
 			s.days = append(s.days, d)
 		}
+		delete(s.pendingDays, date)
 		s.mu.Unlock()
+	} else if !ok {
+		writeErr(w, http.StatusNotFound, "date not found: "+date)
+		return
 	}
 	writeJSON(w, http.StatusOK, d)
 }
@@ -2374,8 +2401,9 @@ async function fetchAndShowDay(date) {
   showOverlay('Building plan for '+date+'…');
   try {
     const day = await api('GET','/days/'+date);
-    // Add to local cache so edits/submits work.
-    if (!days.find(d=>d.date===date)) days.push(day);
+    // Update the local cache (replace stub or add new day).
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i] = day; else days.push(day);
     currentDate = date;
     renderList();
     renderDetail(day);
@@ -2537,7 +2565,14 @@ async function selectDay(date) {
   currentDate = date;
   renderList();
   const day = days.find(d=>d.date===date);
-  if (day) renderDetail(day);
+  // If the day has pending flag set, or has no suggestions and no notes yet
+  // (stub plan - git/ICS not scanned), fetch the full plan from the server.
+  const isStub = !day || day.pending || (!day.submitted && !(day.suggested||[]).length && !(day.notes||[]).length && !(day.existing||[]).length);
+  if (isStub) {
+    await fetchAndShowDay(date);
+  } else {
+    renderDetail(day);
+  }
 }
 
 function getDayLocal(date) { return days.find(d=>d.date===date); }
@@ -2836,7 +2871,9 @@ async function init() {
     renderList();
     if (days.length) {
       const first = days.find(isIncomplete) || days[0];
-      selectDay(first.date);
+      // Always fetch the first day from the server so the full plan
+      // (git/ICS activity) is built even if stubs were returned on startup.
+      await fetchAndShowDay(first.date);
     }
   } catch(e) { toast('Failed to load days: '+e.message, true); }
 }

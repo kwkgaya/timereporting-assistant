@@ -144,38 +144,10 @@ func runMain() {
 		len(days), startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
 
 	// ── Jira clients (split read/write for mock-write mode) ────────────────
-	mockBase := fmt.Sprintf("http://localhost:%d", cfg.MockJiraPort)
-
-	// If any target uses the mock, make sure it's running (auto-spawn the
-	// bundled mockjira binary if the port isn't already listening).
+	// If any target uses the mock, make sure it's running.
 	if cfg.Target != config.TargetReal {
 		ensureMockRunning(cfg.MockJiraPort)
 	}
-
-	var readClient *jira.Client // for fetching existing worklogs
-	var mockClient *jira.Client // always writes to the mock
-	var realClient *jira.Client // writes to real Jira; nil when no credentials
-
-	mockClient = jira.NewClient(mockBase, "", "")
-	if cfg.Jira.BaseURL != "" && cfg.JiraAPIToken != "" {
-		// Use the resolved API base (api.atlassian.com/ex/jira/{cloudId} for scoped
-		// tokens, or the domain URL for classic tokens).
-		realClient = jira.NewClient(cfg.JiraAPIBase(), cfg.Jira.Email, cfg.JiraAPIToken)
-	}
-
-	switch cfg.Target {
-	case config.TargetReal:
-		readClient = realClient
-	case config.TargetMockWrite:
-		readClient = realClient
-	default: // mock
-		readClient = mockClient
-	}
-	if readClient == nil {
-		// mock-write/real selected but no creds yet; fall back to mock reads.
-		readClient = mockClient
-	}
-	_ = readClient // readClient is now handled inside buildPlans
 
 	// ── Build day plans (also used by the /api/reload endpoint) ──────────────
 	buildPlans := func(c config.Config, progress web.ProgressFunc) ([]model.DayPlan, *jira.Client, *jira.Client, error) {
@@ -256,9 +228,53 @@ func runMain() {
 		return ps, mb, rb, nil
 	}
 
-	plans, mockClient, realClient, _ := buildPlans(cfg, nil)
+	// ── Fast startup: build stub plans (existing Jira data only, no git scan) ──
+	// The full plan (activity, ICS) is built lazily when the user navigates to
+	// a day. The server starts immediately after this fast path.
+	mockClient := jira.NewClient(fmt.Sprintf("http://localhost:%d", cfg.MockJiraPort), "", "")
+	var realClient *jira.Client
+	if cfg.Jira.BaseURL != "" && cfg.JiraAPIToken != "" {
+		realClient = jira.NewClient(cfg.JiraAPIBase(), cfg.Jira.Email, cfg.JiraAPIToken)
+	}
 
-	// buildDay builds a single day on demand (for out-of-range date navigation).
+	stubRC := mockClient
+	switch cfg.Target {
+	case config.TargetReal, config.TargetMockWrite:
+		if realClient != nil {
+			stubRC = realClient
+		}
+	}
+	stubExisting := map[string][]model.Worklog{}
+	if stubRC != mockClient {
+		if ex, err := stubRC.ExistingWorklogsByDay(cfg.Jira.Email, startDate, endDate); err == nil {
+			for dk, wls := range ex {
+				for i := range wls { wls[i].Source = "real" }
+				stubExisting[dk] = append(stubExisting[dk], wls...)
+			}
+		}
+	}
+	if ex, err := mockClient.ExistingWorklogsByDay("", startDate, endDate); err == nil {
+		for dk, wls := range ex {
+			for i := range wls { wls[i].Source = "mock" }
+			stubExisting[dk] = append(stubExisting[dk], wls...)
+		}
+	}
+	var stubPlans []model.DayPlan
+	for _, day := range days {
+		dk := day.Format("2006-01-02")
+		stubPlans = append(stubPlans, model.DayPlan{
+			Date:     day,
+			Status:   model.StatusWorking,
+			Existing: stubExisting[dk],
+		})
+	}
+	pendingDates := make([]string, len(days))
+	for i, d := range days {
+		pendingDates[i] = d.Format("2006-01-02")
+	}
+	plans := stubPlans
+
+	// buildDay builds a single day on demand (for out-of-range date navigation
 	buildDay := func(c config.Config, day time.Time) (model.DayPlan, error) {
 		mb := jira.NewClient(fmt.Sprintf("http://localhost:%d", c.MockJiraPort), "", "")
 		var rb *jira.Client
@@ -319,7 +335,8 @@ func runMain() {
 	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
 		WithConfig(cfg, *cfgPath).
 		WithPlanBuilder(web.PlanBuilder(buildPlans)).
-		WithDayBuilder(web.DayBuilder(buildDay))
+		WithDayBuilder(web.DayBuilder(buildDay)).
+		WithPendingDays(pendingDates)
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 	fmt.Printf("   Read from:  %s\n", readLabel(cfg.Target))
