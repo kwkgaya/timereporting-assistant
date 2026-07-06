@@ -17,8 +17,8 @@ func TestParseSemverAndGreater(t *testing.T) {
 		{"v1.0.0", "v0.99.99", true},
 		{"v0.11.1", "v0.11.0", true},
 		{"v0.11.0", "v0.11.0", false},
-		{"v0.11.0", "v0.11.0-beta.1", true},       // release beats prerelease
-		{"v0.11.0-beta.1", "v0.11.0", false},      // prerelease loses to release
+		{"v0.11.0", "v0.11.0-beta.1", true},        // release beats prerelease
+		{"v0.11.0-beta.1", "v0.11.0", false},       // prerelease loses to release
 		{"v0.11.0-beta.2", "v0.11.0-beta.1", true}, // later beta
 	}
 	for _, c := range cases {

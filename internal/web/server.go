@@ -2221,13 +2221,26 @@ function isIncomplete(day) {
 // renderList updates the date picker value and the incomplete-day count.
 function renderList() {
   const picker = document.getElementById('date-picker');
-  if (picker && currentDate) picker.value = currentDate;
+  if (picker) {
+    // No minimum date; only cap at today so future days can't be selected.
+    picker.max = todayStr();
+    picker.removeAttribute('min');
+    if (currentDate) picker.value = currentDate;
+  }
   const el = document.getElementById('incomplete-count');
   if (el) {
     const inc = days.filter(isIncomplete).length;
     el.textContent = inc ? ('⚠ '+inc+' incomplete day(s)') : 'All days complete ✓';
     el.style.color = inc ? '#ff5630' : '#00875a';
   }
+}
+
+// todayStr returns today's local date as YYYY-MM-DD.
+function todayStr() {
+  const d = new Date();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return d.getFullYear()+'-'+m+'-'+day;
 }
 
 // onPickDate jumps to the selected day, snapping to the nearest planned day.
