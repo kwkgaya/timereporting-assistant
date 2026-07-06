@@ -2829,7 +2829,6 @@ async function buildIncompleteDaysInBackground() {
 
 async function init() {
   try {
-    await refreshBadge();
     days = await api('GET','/days');
     renderList();
     if (days.length) {
