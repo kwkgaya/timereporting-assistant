@@ -2160,7 +2160,22 @@ body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#1
 header{background:#0052cc;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px}
 header h1{margin:0;font-size:1.1rem;font-weight:600}
 .badge{font-size:.75rem;background:#0747a6;padding:2px 8px;border-radius:12px}
-main{height:calc(100vh - 48px);display:flex;flex-direction:column}
+main{display:grid;grid-template-columns:230px 1fr;height:calc(100vh - 48px)}
+/* Incomplete-days panel */
+#incomplete-panel{background:#fff;border-right:1px solid #dfe1e6;display:flex;flex-direction:column;overflow:hidden}
+#incomplete-panel-header{padding:10px 14px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#6b778c;border-bottom:1px solid #dfe1e6;flex:none}
+#incomplete-panel-items{overflow-y:auto;flex:1}
+.iday-item{padding:8px 12px;cursor:pointer;border-left:3px solid transparent;user-select:none;border-bottom:1px solid #f4f5f7}
+.iday-item:hover{background:#f4f5f7}
+.iday-item.active{border-left-color:#0052cc;background:#e9f2ff}
+.iday-date{font-size:.8rem;font-weight:700;display:block;color:#172b4d}
+.iday-wd{font-size:.72rem;color:#6b778c}
+.iday-logged{font-size:.72rem;font-weight:600;float:right;margin-top:1px}
+.iday-logged.partial{color:#ff991f}
+.iday-logged.empty{color:#de350b}
+.iday-all-done{padding:12px;font-size:.82rem;color:#00875a;text-align:center}
+/* Right side (toolbar + detail) */
+#main-right{display:flex;flex-direction:column;overflow:hidden}
 #toolbar{padding:10px 20px;background:#fff;border-bottom:1px solid #dfe1e6;display:flex;align-items:center;gap:14px;font-size:.85rem;flex:none}
 #toolbar input[type=date]{font:inherit;padding:5px 8px;border:1px solid #dfe1e6;border-radius:4px}
 #incomplete-count{color:#6b778c}
@@ -2238,11 +2253,17 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
   </span>
 </header>
 <main>
-  <div id="toolbar">
-    <label>📅 Jump to day: <input type="date" id="date-picker" onchange="onPickDate(this.value)" oninput="onPickDate(this.value)"></label>
-    <span id="incomplete-count"></span>
+  <div id="incomplete-panel">
+    <div id="incomplete-panel-header">⚠ Incomplete days</div>
+    <div id="incomplete-panel-items"></div>
   </div>
-  <div id="detail"><p>Loading…</p></div>
+  <div id="main-right">
+    <div id="toolbar">
+      <label>📅 Jump to day: <input type="date" id="date-picker" onchange="onPickDate(this.value)" oninput="onPickDate(this.value)"></label>
+      <span id="incomplete-count"></span>
+    </div>
+    <div id="detail"><p>Loading…</p></div>
+  </div>
 </main>
 <div id="toast"></div>
 <script>
@@ -2279,25 +2300,54 @@ function totalMins(day) {
        + (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
 }
 
-function isIncomplete(day) {
-  return !day.submitted && totalMins(day) < 420;
+// realJiraMins returns the minutes already logged in real Jira for the day.
+function realJiraMins(day) {
+  return (day.existing||[])
+    .filter(w=>w.source==='real')
+    .reduce((a,w)=>a+w.minutes,0);
 }
 
-// renderList updates the date picker value and the incomplete-day count.
+// isIncomplete: a day is incomplete if real Jira has less than 7h logged.
+// Holiday and full_leave days are always considered complete.
+// Future days (after today) are never shown as incomplete.
+function isIncomplete(day) {
+  if (!day) return false;
+  if (day.status==='holiday' || day.status==='full_leave') return false;
+  if (day.date > todayStr()) return false;
+  return realJiraMins(day) < 420;
+}
+
+// renderList updates the date picker, the toolbar count, and the incomplete panel.
 function renderList() {
   const picker = document.getElementById('date-picker');
   if (picker) {
-    // No minimum date; only cap at today so future days can't be selected.
     picker.max = todayStr();
     picker.removeAttribute('min');
     if (currentDate) picker.value = currentDate;
   }
-  const el = document.getElementById('incomplete-count');
-  if (el) {
-    const inc = days.filter(isIncomplete).length;
-    el.textContent = inc ? ('⚠ '+inc+' incomplete day(s)') : 'All days complete ✓';
-    el.style.color = inc ? '#ff5630' : '#00875a';
+  const countEl = document.getElementById('incomplete-count');
+  const incomplete = days.filter(isIncomplete);
+  if (countEl) {
+    countEl.textContent = incomplete.length ? ('⚠ '+incomplete.length+' incomplete') : 'All days complete ✓';
+    countEl.style.color = incomplete.length ? '#ff5630' : '#00875a';
   }
+
+  const panel = document.getElementById('incomplete-panel-items');
+  if (!panel) return;
+  if (!incomplete.length) {
+    panel.innerHTML = '<div class="iday-all-done">✓ All loaded days complete!</div>';
+    return;
+  }
+  panel.innerHTML = incomplete.map(d => {
+    const rMins = realJiraMins(d);
+    const cls = 'iday-item'+(d.date===currentDate?' active':'');
+    const logCls = rMins===0?'empty':'partial';
+    return '<div class="'+cls+'" onclick="selectDay(\''+d.date+'\')">'
+      +'<span class="iday-date">'+d.date+'</span>'
+      +'<span class="iday-logged '+logCls+'">'+hm(rMins)+' / 7h</span>'
+      +'<span class="iday-wd">'+d.weekday+' \u2022 '+d.status.replace('_',' ')+'</span>'
+      +'</div>';
+  }).join('');
 }
 
 // todayStr returns today's local date as YYYY-MM-DD.

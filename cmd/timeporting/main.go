@@ -120,8 +120,10 @@ func runMain() {
 
 	// ── Date range ─────────────────────────────────────────────────────────
 	now := time.Now().UTC()
-	startDate := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	endDate := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC)
+	// Default: first of last month → today. The incomplete-days panel only
+	// shows days up to today so future days never appear in the list.
+	startDate := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if *from != "" {
 		startDate, err = time.Parse("2006-01-02", *from)
 		if err != nil {
