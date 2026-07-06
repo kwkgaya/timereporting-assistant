@@ -172,7 +172,7 @@ func TestAllocateDirect(t *testing.T) {
 			}
 		}
 		plan := BuildDayPlan(
-			Config{WorkdayMinutes: tc.totalMins, MeetingIssueKey: "MTG-1", LeaveIssueKey: "LVE-1"},jun1, model.StatusWorking, nil, nil, acts,
+			Config{WorkdayMinutes: tc.totalMins, MeetingIssueKey: "MTG-1", LeaveIssueKey: "LVE-1"}, jun1, model.StatusWorking, nil, nil, acts,
 		)
 		total := sumSuggested(plan)
 		if total != tc.totalMins {
@@ -214,4 +214,3 @@ func TestClonePreviousDay(t *testing.T) {
 		}
 	}
 }
-

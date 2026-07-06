@@ -220,8 +220,8 @@ type configView struct {
 	Target         string   `json:"target"`
 	// Pointers so a partial PUT (e.g. the wizard's final step) can omit these
 	// without resetting them to false.
-	AutoUpdate       *bool `json:"autoUpdate,omitempty"`
-	UpdatePrerelease *bool `json:"updatePrerelease,omitempty"`
+	AutoUpdate            *bool `json:"autoUpdate,omitempty"`
+	UpdatePrerelease      *bool `json:"updatePrerelease,omitempty"`
 	LogMeetingsSeparately *bool `json:"logMeetingsSeparately,omitempty"`
 }
 
@@ -230,18 +230,18 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.cfg
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, configView{
-		JiraBaseURL:      cfg.Jira.BaseURL,
-		JiraEmail:        cfg.Jira.Email,
-		MeetingKey:       cfg.MeetingIssueKey,
-		LeaveKey:         cfg.LeaveIssueKey,
-		WorkdayHours:     cfg.WorkdayHours,
-		LocalRepos:       cfg.LocalRepos,
-		GitAuthors:       cfg.GitAuthors,
-		GitHubUsername:   cfg.GitHub.Username,
-		ICSPath:          cfg.ICSPath,
-		MockJiraPort:     cfg.MockJiraPort,
-		WebPort:          cfg.WebPort,
-		Target:           cfg.Target,
+		JiraBaseURL:           cfg.Jira.BaseURL,
+		JiraEmail:             cfg.Jira.Email,
+		MeetingKey:            cfg.MeetingIssueKey,
+		LeaveKey:              cfg.LeaveIssueKey,
+		WorkdayHours:          cfg.WorkdayHours,
+		LocalRepos:            cfg.LocalRepos,
+		GitAuthors:            cfg.GitAuthors,
+		GitHubUsername:        cfg.GitHub.Username,
+		ICSPath:               cfg.ICSPath,
+		MockJiraPort:          cfg.MockJiraPort,
+		WebPort:               cfg.WebPort,
+		Target:                cfg.Target,
 		AutoUpdate:            &cfg.AutoUpdate,
 		UpdatePrerelease:      &cfg.UpdatePrerelease,
 		LogMeetingsSeparately: &cfg.LogMeetingsSeparately,
@@ -1180,7 +1180,6 @@ func (s *Server) apiClonePrevious(w http.ResponseWriter, r *http.Request) {
 	// Find the most recent previous weekday that is not a full leave or holiday.
 	// Iterate up to 7 days back to skip weekends and leave days.
 	var prev *DayView
-	var prevDate string
 	for d := t.AddDate(0, 0, -1); d.After(t.AddDate(0, 0, -10)); d = d.AddDate(0, 0, -1) {
 		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
 			continue
@@ -1225,18 +1224,63 @@ func (s *Server) apiClonePrevious(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		prev = &pday
-		prevDate = pk
 		break
+	}
+
+	// If no in-cache day found, try fetching directly from Jira.
+	if prev == nil {
+		s.mu.Lock()
+		rc := s.readClientLocked()
+		email := s.cfg.Jira.Email
+		s.mu.Unlock()
+		for d := t.AddDate(0, 0, -1); d.After(t.AddDate(0, 0, -10)); d = d.AddDate(0, 0, -1) {
+			if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+				continue
+			}
+			byDay, err := rc.ExistingWorklogsByDay(email, d, d)
+			if err != nil {
+				break
+			}
+			dk := d.Format("2006-01-02")
+			wls := byDay[dk]
+			if len(wls) > 0 {
+				var views []WlogView
+				for _, wl := range wls {
+					views = append(views, WlogView{
+						IssueKey: wl.IssueKey,
+						Minutes:  wl.Minutes,
+						Comment:  wl.Comment,
+						Category: string(model.CategoryManual),
+					})
+				}
+				fallback := &DayView{Suggested: views}
+				prev = fallback
+				break
+			}
+		}
 	}
 
 	if prev == nil {
 		writeErr(w, http.StatusBadRequest, "no suitable previous day found")
 		return
 	}
-	_ = prevDate
+
+	// Prefer Suggested; fall back to Existing (stripped of IDs) when Suggested is empty.
+	// This handles the case where the previous day was already fully submitted.
+	cloneSource := prev.Suggested
+	if len(cloneSource) == 0 && len(prev.Existing) > 0 {
+		for _, w := range prev.Existing {
+			cloneSource = append(cloneSource, WlogView{
+				IssueKey: w.IssueKey,
+				Minutes:  w.Minutes,
+				Comment:  w.Comment,
+				Category: string(model.CategoryManual),
+			})
+		}
+	}
 
 	s.mu.Lock()
-	s.days[idx].Suggested = prev.Suggested
+	s.days[idx].Suggested = cloneSource
 	updated := s.days[idx]
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, updated)

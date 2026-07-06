@@ -117,7 +117,7 @@ func TestParse_EscapedSummary(t *testing.T) {
 	}
 }
 
-func TestIsHolidayDay(t *testing.T) {	// All-day event with "holiday" in the title on 2026-06-17.
+func TestIsHolidayDay(t *testing.T) { // All-day event with "holiday" in the title on 2026-06-17.
 	raw := strings.Join([]string{
 		"BEGIN:VCALENDAR",
 		"BEGIN:VEVENT",

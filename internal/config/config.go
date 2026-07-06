@@ -99,16 +99,16 @@ type Config struct {
 // Default returns a config with sensible defaults for the MVP.
 func Default() Config {
 	return Config{
-		Jira:             JiraConfig{},
-		MeetingIssueKey:  "EDB-9071",
-		LeaveIssueKey:    "EDB-9070",
-		WorkdayHours:     7,
-		GitHub:           GitHubConfig{APIBaseURL: "https://api.github.com"},
-		MockJiraPort:     9099,
-		WebPort:          9080,
-		Target:           TargetJira,
-		AutoUpdate:       true,
-		UpdatePrerelease: false,
+		Jira:                  JiraConfig{},
+		MeetingIssueKey:       "EDB-9071",
+		LeaveIssueKey:         "EDB-9070",
+		WorkdayHours:          7,
+		GitHub:                GitHubConfig{APIBaseURL: "https://api.github.com"},
+		MockJiraPort:          9099,
+		WebPort:               9080,
+		Target:                TargetJira,
+		AutoUpdate:            true,
+		UpdatePrerelease:      false,
 		LogMeetingsSeparately: true,
 	}
 }
