@@ -2443,7 +2443,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .new-row input{border:1px dashed #0052cc;background:#f7faff}
 .issue-search-results{position:absolute;left:0;top:100%;z-index:20;background:#fff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:260px;overflow-y:auto;min-width:340px;display:none}
 .isr-item{padding:7px 12px;cursor:pointer;font-size:.85rem;border-bottom:1px solid #f0f1f3}
-.isr-item:hover{background:#e9f2ff}
+.isr-item:hover,.isr-item.active{background:#e9f2ff}
 .isr-item strong{color:#0052cc;margin-right:6px}
 .isr-empty{padding:8px 12px;color:#6b778c;font-size:.82rem}
 .del-btn{background:none;border:none;cursor:pointer;color:#de350b;font-size:1rem;padding:0 4px}
@@ -2972,11 +2972,37 @@ function pickIssue(key) {
 }
 
 function onNewRowKey(ev, input) {
+  const box = document.getElementById('issue-search-results');
+  const items = box ? Array.from(box.querySelectorAll('.isr-item')) : [];
+  const active = box ? box.querySelector('.isr-item.active') : null;
+  const idx = active ? items.indexOf(active) : -1;
+
+  if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    items.forEach(el => el.classList.remove('active'));
+    const next = items[idx + 1] || items[0];
+    if (next) { next.classList.add('active'); next.scrollIntoView({block:'nearest'}); }
+    return;
+  }
+  if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    items.forEach(el => el.classList.remove('active'));
+    const prev = items[idx - 1] || items[items.length - 1];
+    if (prev) { prev.classList.add('active'); prev.scrollIntoView({block:'nearest'}); }
+    return;
+  }
   if (ev.key === 'Enter') {
     ev.preventDefault();
-    const v = input.value.trim();
-    if (v) addRowWithKey(v);
-  } else if (ev.key === 'Escape') {
+    if (active) {
+      // Pick the highlighted result.
+      active.dispatchEvent(new MouseEvent('mousedown'));
+    } else {
+      const v = input.value.trim();
+      if (v) addRowWithKey(v);
+    }
+    return;
+  }
+  if (ev.key === 'Escape') {
     hideIssueResults();
   }
 }
