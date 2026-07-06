@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/trayapp"
 )
 
@@ -43,5 +44,6 @@ func main() {
 		return
 	}
 
+	defer applog.Setup("tray")()
 	trayapp.Run(version, *cfgPath)
 }

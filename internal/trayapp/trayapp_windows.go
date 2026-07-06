@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"fyne.io/systray"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
 )
 
@@ -73,6 +75,7 @@ func onReady(version, cfgPath string) {
 	// Menu items.
 	mOpenReport := systray.AddMenuItem("Open time report", "Open the review UI in your browser")
 	mOpenMock := systray.AddMenuItem("Mock Jira inspect", "Open the mock Jira inspect page")
+	mOpenLogs := systray.AddMenuItem("Open logs folder", "Open the folder containing the log file")
 	systray.AddSeparator()
 	mAutoStart := systray.AddMenuItemCheckbox("Start at login", "Toggle auto-start at Windows login", isAutoStartRegistered())
 	mVersion := systray.AddMenuItem("Version: "+version, "")
@@ -96,6 +99,8 @@ func onReady(version, cfgPath string) {
 			openBrowser(webURL)
 		case <-mOpenMock.ClickedCh:
 			openBrowser(mockURL)
+		case <-mOpenLogs.ClickedCh:
+			openLogsFolder()
 		case <-mAutoStart.ClickedCh:
 			if mAutoStart.Checked() {
 				_ = UnregisterAutoStart()
@@ -168,25 +173,53 @@ func countIncompleteDays(cfg config.Config) int {
 }
 
 // ensureServerRunning starts timeporting if the review UI isn't already up.
+// It blocks (up to ~30s) until the web port is accepting connections so the
+// caller can open the browser without hitting a not-yet-listening port.
 func ensureServerRunning(cfg config.Config) {
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.WebPort)
-	if c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond); err == nil {
-		_ = c.Close()
+	if portOpen(addr) {
 		return
 	}
 	exe, err := os.Executable()
 	if err != nil {
+		log.Printf("ensureServerRunning: os.Executable: %v", err)
 		return
 	}
 	name := "timeporting.exe"
 	path := filepath.Join(filepath.Dir(exe), name)
 	if _, err := os.Stat(path); err != nil {
+		log.Printf("ensureServerRunning: %s not found: %v", path, err)
 		return
 	}
 	cmd := exec.Command(path, "--target", "mock", "--no-browser")
 	// CREATE_NO_WINDOW prevents any console window from appearing.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		log.Printf("ensureServerRunning: start %s: %v", path, err)
+		return
+	}
+	log.Printf("ensureServerRunning: started %s (pid %d), waiting for %s", path, cmd.Process.Pid, addr)
+
+	// Wait for the server to finish building plans and start listening.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if portOpen(addr) {
+			log.Printf("ensureServerRunning: %s is up", addr)
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	log.Printf("ensureServerRunning: timed out waiting for %s", addr)
+}
+
+// portOpen reports whether a TCP connection to addr succeeds quickly.
+func portOpen(addr string) bool {
+	c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 // ── Auto-start (per-user registry, no admin) ─────────────────────────────────
@@ -307,4 +340,13 @@ func openBrowser(url string) {
 	if runtime.GOOS == "windows" {
 		_ = exec.Command("cmd", "/c", "start", "", url).Start()
 	}
+}
+
+// openLogsFolder opens the directory containing the log file in Explorer.
+func openLogsFolder() {
+	dir := applog.LogDir()
+	_ = os.MkdirAll(dir, 0o700)
+	cmd := exec.Command("explorer", dir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	_ = cmd.Start()
 }

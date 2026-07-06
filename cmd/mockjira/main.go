@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/mockjira"
 )
 
@@ -23,6 +24,8 @@ func main() {
 		fmt.Printf("mockjira %s\n", version)
 		return
 	}
+
+	defer applog.Setup("mockjira")()
 
 	srv := mockjira.NewDefault()
 	addr := fmt.Sprintf(":%d", *port)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/activity"
+	"github.com/kwkgaya/timereporting-assistant/internal/applog"
 	"github.com/kwkgaya/timereporting-assistant/internal/config"
 	"github.com/kwkgaya/timereporting-assistant/internal/engine"
 	"github.com/kwkgaya/timereporting-assistant/internal/ics"
@@ -73,6 +74,8 @@ func runCredentials() {
 
 // runMain is the primary review-and-submit flow.
 func runMain() {
+	defer applog.Setup("timeporting")()
+
 	cfgPath := flag.String("config", defaultConfigPath(), "path to config JSON file")
 	from := flag.String("from", "", "start date YYYY-MM-DD (default: first day of current month)")
 	to := flag.String("to", "", "end date YYYY-MM-DD (default: last day of current month)")
