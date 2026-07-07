@@ -2095,9 +2095,11 @@ button.secondary:hover{background:#f4f5f7}
 </header>
 <main>
 
-<!-- Credential status banner -->
-<section id="cred-section">
-  <h2>Credentials</h2>
+<!-- Save bar -->
+<section style="background:#e3fcef;border:1px solid #79f2c0;border-radius:6px;padding:14px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+  <span style="font-size:.9rem;color:#006644">✏️ Make your changes below, then click <strong>Save &amp; rebuild plans</strong> to apply them.</span>
+  <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
+  <span id=\"cfg-msg\" style=\"font-size:.82rem\"></span>\n</section>\n\n<!-- Credential status banner -->\n<section id=\"cred-section\">\n  <h2>Credentials</h2>
   <p style="font-size:.85rem;color:#42526e;margin:0 0 12px">Status of your API tokens. Tokens are stored securely in the Windows Credential Manager — never in a file on disk.</p>
   <div class="cred-row">
     <strong style="min-width:120px">Jira token:</strong>
@@ -2225,8 +2227,6 @@ button.secondary:hover{background:#f4f5f7}
       Include beta (prerelease) versions when updating
     </label>
   </div>
-  <button class="primary" onclick="saveAndRebuild()">Save &amp; rebuild plans</button>
-  <span id="cfg-msg" style="margin-left:12px;font-size:.82rem"></span>
 </section>
 
 </main>
