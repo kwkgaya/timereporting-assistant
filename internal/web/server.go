@@ -2741,18 +2741,16 @@ function renderDetail(day) {
     html += '</table>';
   }
 
-  // Summary line — shown when day is not already full from Jira.
-  if (!dayFull) {
-    html += '<div class="summary-line">'
-      +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">7h</strong></span>'
-      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
-      +'<span style="color:#6b778c">Existing: <strong style="color:#172b4d">'+hm(existMins)+'</strong></span>'
-      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
-      +'<span style="color:#6b778c">Suggested: <strong style="color:#0052cc">'+hm(suggMins)+'</strong></span>'
-      +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
-      +'<span style="color:#6b778c">Total: <strong class="'+totalCls+'">'+hm(total)+'</strong></span>'
-      +'</div>';
-  }
+  // Summary line — always shown.
+  html += '<div class="summary-line">'
+    +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">7h</strong></span>'
+    +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+    +'<span style="color:#6b778c">Existing: <strong style="color:#172b4d">'+hm(existMins)+'</strong></span>'
+    +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+    +'<span style="color:#6b778c">Suggested: <strong style="color:#0052cc">'+hm(suggMins)+'</strong></span>'
+    +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
+    +'<span style="color:#6b778c">Total: <strong class="'+totalCls+'">'+hm(total)+'</strong></span>'
+    +'</div>';
 
   // Submit actions — only when day still has unsubmitted rows that cover remaining time.
   const allRowsSubmitted = (day.suggested||[]).filter(w=>w.minutes>0).length > 0
