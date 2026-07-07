@@ -24,12 +24,12 @@ const (
 
 // Release describes a GitHub release and its installer asset.
 type Release struct {
-	TagName       string
-	Prerelease    bool
-	Body          string // release notes from GitHub
-	AssetName     string // installer asset file name
-	AssetURL      string // browser_download_url of the installer asset
-	ChecksumURL   string // browser_download_url of the .sha256 file (may be empty)
+	TagName     string
+	Prerelease  bool
+	Body        string // release notes from GitHub
+	AssetName   string // installer asset file name
+	AssetURL    string // browser_download_url of the installer asset
+	ChecksumURL string // browser_download_url of the .sha256 file (may be empty)
 }
 
 // Checker queries the GitHub Releases API.

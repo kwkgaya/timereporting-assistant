@@ -203,7 +203,20 @@ func (s *Server) Handler() http.Handler {
 // Plain GET/HEAD requests and requests with no Origin/Referer are allowed
 // (curl / non-browser clients need to work).
 func csrfMiddleware(next http.Handler, port int) http.Handler {
-	allowed := fmt.Sprintf("http://localhost:%d", port)
+	// Accept both localhost and 127.0.0.1 since Windows may open the browser
+	// with either address.
+	allowedHosts := []string{
+		fmt.Sprintf("http://localhost:%d", port),
+		fmt.Sprintf("http://127.0.0.1:%d", port),
+	}
+	isAllowed := func(s string) bool {
+		for _, h := range allowedHosts {
+			if s == h || strings.HasPrefix(s, h+"/") {
+				return true
+			}
+		}
+		return false
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
@@ -213,17 +226,11 @@ func csrfMiddleware(next http.Handler, port int) http.Handler {
 			if origin == "" && referer == "" {
 				break
 			}
-			ok := false
-			if origin != "" && origin == allowed {
-				ok = true
+			if (origin != "" && isAllowed(origin)) || (referer != "" && isAllowed(referer)) {
+				break
 			}
-			if !ok && strings.HasPrefix(referer, allowed) {
-				ok = true
-			}
-			if !ok {
-				http.Error(w, "CSRF: request origin not allowed", http.StatusForbidden)
-				return
-			}
+			http.Error(w, "CSRF: request origin not allowed", http.StatusForbidden)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

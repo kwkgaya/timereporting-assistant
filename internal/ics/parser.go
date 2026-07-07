@@ -34,8 +34,13 @@ func ParseFile(path string) ([]model.Meeting, error) {
 // ParseURL fetches an ICS document from url and returns the meetings it contains.
 // A 30-second timeout is applied to the HTTP request.
 func ParseURL(rawURL string) ([]model.Meeting, error) {
-	if !strings.HasPrefix(strings.ToLower(rawURL), "https://") {
-		return nil, fmt.Errorf("calendar URL must use HTTPS (got %q)", rawURL)
+	// Normalise webcal:// to https:// (common for Outlook published links).
+	if strings.HasPrefix(strings.ToLower(rawURL), "webcal://") {
+		rawURL = "https://" + rawURL[len("webcal://"):]
+	}
+	if !strings.HasPrefix(strings.ToLower(rawURL), "https://") &&
+		!strings.HasPrefix(strings.ToLower(rawURL), "http://") {
+		return nil, fmt.Errorf("calendar URL must start with https:// or http:// (got %q)", rawURL)
 	}
 	resp, err := httpClient.Get(rawURL)
 	if err != nil {
