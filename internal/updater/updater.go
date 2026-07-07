@@ -3,6 +3,8 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,11 +24,12 @@ const (
 
 // Release describes a GitHub release and its installer asset.
 type Release struct {
-	TagName    string
-	Prerelease bool
-	Body       string // release notes from GitHub
-	AssetName  string // installer asset file name
-	AssetURL   string // browser_download_url of the installer asset
+	TagName       string
+	Prerelease    bool
+	Body          string // release notes from GitHub
+	AssetName     string // installer asset file name
+	AssetURL      string // browser_download_url of the installer asset
+	ChecksumURL   string // browser_download_url of the .sha256 file (may be empty)
 }
 
 // Checker queries the GitHub Releases API.
@@ -83,12 +86,14 @@ func (c *Checker) list() ([]Release, error) {
 			continue
 		}
 		name, dl := installerAsset(w.Assets)
+		chkURL := checksumAsset(w.Assets, name)
 		out = append(out, Release{
-			TagName:    w.TagName,
-			Prerelease: w.Prerelease,
-			Body:       w.Body,
-			AssetName:  name,
-			AssetURL:   dl,
+			TagName:     w.TagName,
+			Prerelease:  w.Prerelease,
+			Body:        w.Body,
+			AssetName:   name,
+			AssetURL:    dl,
+			ChecksumURL: chkURL,
 		})
 	}
 	return out, nil
@@ -106,6 +111,20 @@ func installerAsset(assets []struct {
 		}
 	}
 	return "", ""
+}
+
+// checksumAsset finds the .sha256 file corresponding to the installer asset.
+func checksumAsset(assets []struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
+}, installerName string) string {
+	want := installerName + ".sha256"
+	for _, a := range assets {
+		if strings.EqualFold(a.Name, want) {
+			return a.URL
+		}
+	}
+	return ""
 }
 
 // Latest returns the newest release strictly newer than currentVersion, or nil
@@ -174,14 +193,47 @@ func (c *Checker) Download(r *Release, destDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
 		f.Close()
 		return "", err
 	}
 	if err := f.Close(); err != nil {
 		return "", err
 	}
+	// Verify checksum if a .sha256 asset was published with this release.
+	if r.ChecksumURL != "" {
+		got := hex.EncodeToString(h.Sum(nil))
+		if err := c.verifyChecksum(r.ChecksumURL, got); err != nil {
+			_ = os.Remove(dest)
+			return "", fmt.Errorf("installer checksum verification failed: %w", err)
+		}
+	}
 	return dest, nil
+}
+
+// verifyChecksum fetches the expected SHA-256 from checksumURL and compares
+// it against the hex digest of the downloaded file.
+func (c *Checker) verifyChecksum(checksumURL, gotHex string) error {
+	resp, err := c.HTTPClient.Get(checksumURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+	if err != nil {
+		return err
+	}
+	// The .sha256 file may be "HASH  filename\n" or just "HASH\n".
+	parts := strings.Fields(string(raw))
+	if len(parts) == 0 {
+		return fmt.Errorf("empty checksum file")
+	}
+	want := strings.ToLower(parts[0])
+	if want != strings.ToLower(gotHex) {
+		return fmt.Errorf("expected %s, got %s", want, gotHex)
+	}
+	return nil
 }
 
 // semver is a minimal semantic version for comparing release tags.

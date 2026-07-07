@@ -21,6 +21,9 @@ import (
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
 
+// jiraIssueKeyRE validates Jira issue keys before submitting to the API.
+var jiraIssueKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+$`)
+
 // DayView is the JSON shape the UI works with.
 type DayView struct {
 	Date       string           `json:"date"`       // YYYY-MM-DD
@@ -1058,6 +1061,10 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 		if wl.IssueKey == "" || wl.Minutes <= 0 {
 			continue
 		}
+		if !jiraIssueKeyRE.MatchString(wl.IssueKey) {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("invalid issue key %q — must match PROJECT-123", wl.IssueKey))
+			return
+		}
 		fingerprint := wl.IssueKey + "|" + wl.Comment
 		if alreadyLogged[fingerprint] {
 			continue // idempotent: don't re-submit the same worklog
@@ -1156,6 +1163,10 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 	}
 	if wl.IssueKey == "" || wl.Minutes <= 0 {
 		writeErr(w, http.StatusBadRequest, "row has no issue key or zero minutes")
+		return
+	}
+	if !jiraIssueKeyRE.MatchString(wl.IssueKey) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("invalid issue key %q", wl.IssueKey))
 		return
 	}
 

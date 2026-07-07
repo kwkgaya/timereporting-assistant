@@ -11,12 +11,26 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/adf"
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
+
+// issueKeyRE validates Jira issue key format (e.g. EDB-9071).
+// Only keys matching this pattern are accepted in API calls to prevent
+// JQL/URL injection via user-supplied values.
+var issueKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+$`)
+
+// validateKey returns an error if key is not a valid Jira issue key.
+func validateKey(key string) error {
+	if !issueKeyRE.MatchString(key) {
+		return fmt.Errorf("invalid Jira issue key %q (expected format PROJECT-123)", key)
+	}
+	return nil
+}
 
 // WorklogMarker is appended to comments this tool writes, so re-runs can detect
 // worklogs it already created and avoid duplicating them.
@@ -180,6 +194,9 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 
 // GetIssue returns an issue's summary.
 func (c *Client) GetIssue(key string) (Issue, error) {
+	if err := validateKey(key); err != nil {
+		return Issue{}, err
+	}
 	data, err := c.do(http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"?fields=summary", nil)
 	if err != nil {
 		return Issue{}, err
@@ -251,6 +268,9 @@ func (c *Client) AssignedIssuesForDay(day time.Time) ([]Issue, error) {
 // ListWorklogs returns all worklogs on an issue as model.Worklog values
 // (Category = existing).
 func (c *Client) ListWorklogs(key string) ([]model.Worklog, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
 	data, err := c.do(http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"/worklog", nil)
 	if err != nil {
 		return nil, err
@@ -288,6 +308,9 @@ func (c *Client) ListWorklogs(key string) ([]model.Worklog, error) {
 // AddWorklog logs work against an issue. minutes is converted to seconds,
 // started is sent as noon-UTC (per the caller), and comment is wrapped in ADF.
 func (c *Client) AddWorklog(key string, minutes int, started time.Time, comment string) (model.Worklog, error) {
+	if err := validateKey(key); err != nil {
+		return model.Worklog{}, err
+	}
 	body := map[string]any{
 		"timeSpentSeconds": minutes * 60,
 		"started":          started.UTC().Format(jiraTimeLayout),
@@ -353,6 +376,9 @@ func (c *Client) ExistingWorklogsByDay(authorEmail string, start, end time.Time)
 
 // UpdateWorklog updates an existing worklog's duration, start time, and comment.
 func (c *Client) UpdateWorklog(issueKey, worklogID string, minutes int, started time.Time, comment string) error {
+	if err := validateKey(issueKey); err != nil {
+		return err
+	}
 	body := map[string]any{
 		"timeSpentSeconds": minutes * 60,
 		"started":          started.UTC().Format(jiraTimeLayout),
@@ -367,6 +393,9 @@ func (c *Client) UpdateWorklog(issueKey, worklogID string, minutes int, started 
 
 // DeleteWorklog removes a worklog by ID from an issue.
 func (c *Client) DeleteWorklog(issueKey, worklogID string) error {
+	if err := validateKey(issueKey); err != nil {
+		return err
+	}
 	path := "/rest/api/3/issue/" + url.PathEscape(issueKey) + "/worklog/" + url.PathEscape(worklogID)
 	_, err := c.do(http.MethodDelete, path, nil)
 	return err

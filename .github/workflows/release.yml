@@ -59,6 +59,15 @@ jobs:
           & $iscc "/DAppVersion=$v" "/DDistDir=$($PWD.Path)\dist" build\installer\timereporting.iss
           Get-ChildItem dist\*.exe | ForEach-Object { Write-Host $_.Name }
 
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\TimereportingAssistant-Setup-*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding UTF8
+            Write-Host "$($_.Name).sha256: $hash"
+          }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -67,3 +76,4 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/TimereportingAssistant-Setup-*.exe
+            dist/TimereportingAssistant-Setup-*.exe.sha256
