@@ -6,7 +6,7 @@ A small Windows desktop tool that **automatically fills in your Jira time report
 
 For each working day it:
 1. Reads **existing Jira worklogs** (already counted toward the 7 h target)
-2. Logs **calendar meetings** first (from Outlook via published URL or exported .ics)
+2. Logs **calendar meetings** first (from Outlook via published ICS URL)
 3. Splits the **remaining time** across the Jira issues found in your Git commits and GitHub activity, proportional to how much you worked on each
 4. Shows you a **review UI** where you can edit every suggested row before submitting
 
