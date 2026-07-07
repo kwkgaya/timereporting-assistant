@@ -194,9 +194,6 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 
 // GetIssue returns an issue's summary.
 func (c *Client) GetIssue(key string) (Issue, error) {
-	if err := validateKey(key); err != nil {
-		return Issue{}, err
-	}
 	data, err := c.do(http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"?fields=summary", nil)
 	if err != nil {
 		return Issue{}, err
@@ -268,9 +265,6 @@ func (c *Client) AssignedIssuesForDay(day time.Time) ([]Issue, error) {
 // ListWorklogs returns all worklogs on an issue as model.Worklog values
 // (Category = existing).
 func (c *Client) ListWorklogs(key string) ([]model.Worklog, error) {
-	if err := validateKey(key); err != nil {
-		return nil, err
-	}
 	data, err := c.do(http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"/worklog", nil)
 	if err != nil {
 		return nil, err
