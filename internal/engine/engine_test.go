@@ -82,6 +82,23 @@ func TestWorkingDayWithMeetings(t *testing.T) {
 	}
 }
 
+// TestAlreadyLoggedMeetingNotSuggestedAgain verifies that a meeting whose
+// comment is already present in Existing worklogs is not re-suggested.
+func TestAlreadyLoggedMeetingNotSuggestedAgain(t *testing.T) {
+	existing := []model.Worklog{
+		{IssueKey: testCfg.MeetingIssueKey, Minutes: 30, Comment: "Test meeting", Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},
+		{IssueKey: "EDB-100", Minutes: 300, Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},
+	}
+	acts := []model.Activity{activity("EDB-100 work", "feat/EDB-100")}
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, existing, makeMeetings(30), acts)
+
+	for _, w := range plan.Suggested {
+		if w.IssueKey == testCfg.MeetingIssueKey && w.Comment == "Test meeting" {
+			t.Error("already-logged meeting should not be suggested again")
+		}
+	}
+}
+
 func TestTopUpExistingWorklogs(t *testing.T) {
 	existing := []model.Worklog{
 		{IssueKey: "EDB-100", Minutes: 180, Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},

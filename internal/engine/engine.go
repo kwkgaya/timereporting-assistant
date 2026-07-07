@@ -103,15 +103,27 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 
 	// --- Meetings first ---
 	if cfg.LogMeetingsSeparately {
+		// Build a set of already-logged comments for the meeting issue key so we
+		// don't re-suggest a meeting that was already submitted.
+		loggedMeetingComments := map[string]bool{}
+		for _, wl := range existing {
+			if strings.EqualFold(wl.IssueKey, cfg.MeetingIssueKey) {
+				loggedMeetingComments[wl.Comment] = true
+			}
+		}
 		// One worklog per meeting, using the meeting summary as comment.
 		for _, m := range meetings {
-			mins := roundToBlock(clamp(m.Minutes(), 0, remaining))
-			if mins <= 0 {
-				continue
-			}
 			comment := m.Summary
 			if comment == "" {
 				comment = fmt.Sprintf("Meeting (%s)", started.Format("2006-01-02"))
+			}
+			// Skip meetings that are already logged with the same comment.
+			if loggedMeetingComments[comment] {
+				continue
+			}
+			mins := roundToBlock(clamp(m.Minutes(), 0, remaining))
+			if mins <= 0 {
+				continue
 			}
 			plan.Suggested = append(plan.Suggested, model.Worklog{
 				IssueKey: cfg.MeetingIssueKey,
@@ -127,8 +139,10 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		}
 	} else {
 		// Aggregate all meetings into one worklog.
+		// Count how much meeting time is already logged for the meeting key.
+		alreadyMeetingMins := countExistingForKey(existing, cfg.MeetingIssueKey)
 		meetingMins := ics.TotalMinutesForDay(meetings, day)
-		meetingAlloc := clamp(meetingMins, 0, remaining)
+		meetingAlloc := clamp(meetingMins-alreadyMeetingMins, 0, remaining)
 		meetingAlloc = roundToBlock(meetingAlloc)
 		if meetingAlloc > 0 {
 			plan.Suggested = append(plan.Suggested, model.Worklog{
