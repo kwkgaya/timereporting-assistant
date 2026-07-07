@@ -14,11 +14,13 @@ Days with no detectable activity prompt you to assign the Jira task manually.
 
 ## Quick start
 
-1. Download the installer from [Releases](https://github.com/kwkgaya/timereporting-assistant/releases)
-2. Run `TimereportingAssistant-Setup-vX.Y.Z.exe` — no admin required
+1. Download the latest stable installer: **[TimereportingAssistant-Setup-v0.29.6.exe](https://github.com/kwkgaya/timereporting-assistant/releases/tag/v0.29.6)**
+2. Run it — no admin required
 3. The tray icon appears; click **Open time report** and follow the setup wizard
 
 The wizard walks you through connecting your Jira account, GitHub token, calendar, and local git repos.
+
+> **Beta releases** are listed separately on the [Releases page](https://github.com/kwkgaya/timereporting-assistant/releases). Install a beta only if you want to test new features before they are stable.
 
 ## Calendar integration
 
