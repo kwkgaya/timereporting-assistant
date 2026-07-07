@@ -94,6 +94,11 @@ type Config struct {
 	// Defaults to false.
 	UpdatePrerelease bool `json:"updatePrerelease"`
 
+	// ReportFrom / ReportTo define the date range shown in the review UI.
+	// Format: YYYY-MM-DD. Empty means "use the default" (first of last month → today).
+	ReportFrom string `json:"reportFrom,omitempty"`
+	ReportTo   string `json:"reportTo,omitempty"`
+
 	// Secrets, populated from the environment (never from JSON).
 	JiraAPIToken string `json:"-"`
 	GitHubToken  string `json:"-"`

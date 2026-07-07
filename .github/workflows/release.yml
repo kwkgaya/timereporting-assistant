@@ -24,6 +24,13 @@ jobs:
         shell: pwsh
         run: echo "version=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
 
+      - name: Verify module checksums
+        shell: pwsh
+        run: |
+          go mod verify
+          go mod tidy
+          if (git diff --quiet go.sum) { Write-Host "go.sum clean" } else { Write-Error "go.sum changed after go mod tidy — commit the updated go.sum"; exit 1 }
+
       - name: Build binaries
         shell: pwsh
         run: |

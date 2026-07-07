@@ -24,6 +24,7 @@ const (
 type Release struct {
 	TagName    string
 	Prerelease bool
+	Body       string // release notes from GitHub
 	AssetName  string // installer asset file name
 	AssetURL   string // browser_download_url of the installer asset
 }
@@ -67,6 +68,7 @@ func (c *Checker) list() ([]Release, error) {
 		TagName    string `json:"tag_name"`
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
+		Body       string `json:"body"`
 		Assets     []struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
@@ -84,6 +86,7 @@ func (c *Checker) list() ([]Release, error) {
 		out = append(out, Release{
 			TagName:    w.TagName,
 			Prerelease: w.Prerelease,
+			Body:       w.Body,
 			AssetName:  name,
 			AssetURL:   dl,
 		})

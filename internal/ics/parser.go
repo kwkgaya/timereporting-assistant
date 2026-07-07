@@ -33,8 +33,11 @@ func ParseFile(path string) ([]model.Meeting, error) {
 
 // ParseURL fetches an ICS document from url and returns the meetings it contains.
 // A 30-second timeout is applied to the HTTP request.
-func ParseURL(url string) ([]model.Meeting, error) {
-	resp, err := httpClient.Get(url)
+func ParseURL(rawURL string) ([]model.Meeting, error) {
+	if !strings.HasPrefix(strings.ToLower(rawURL), "https://") {
+		return nil, fmt.Errorf("calendar URL must use HTTPS (got %q)", rawURL)
+	}
+	resp, err := httpClient.Get(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch calendar URL: %w", err)
 	}

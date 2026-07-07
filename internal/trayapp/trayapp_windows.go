@@ -479,8 +479,30 @@ func checkForUpdates(cfg config.Config, version string, manual bool) {
 		return
 	}
 	log.Printf("update available: %s (current %s)", rel.TagName, version)
+	// Build a short summary of release notes (first 3 non-empty lines).
+	releaseNotes := ""
+	if rel.Body != "" {
+		lines := strings.Split(rel.Body, "\n")
+		var summary []string
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			if l != "" && !strings.HasPrefix(l, "#") {
+				summary = append(summary, l)
+				if len(summary) == 3 {
+					break
+				}
+			}
+		}
+		if len(summary) > 0 {
+			releaseNotes = strings.Join(summary, " · ")
+		}
+	}
+	toastBody := "Downloading " + rel.TagName + "…"
+	if releaseNotes != "" {
+		toastBody = rel.TagName + ": " + releaseNotes
+	}
 	if manual {
-		showToast("Updating Timereporting Assistant", "Downloading "+rel.TagName+"…", "")
+		showToast("Updating Timereporting Assistant", toastBody, "")
 	}
 	dir := filepath.Join(os.TempDir(), "timereporting-update")
 	path, err := chk.Download(rel, dir)

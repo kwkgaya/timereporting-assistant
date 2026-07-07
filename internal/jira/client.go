@@ -372,25 +372,24 @@ func (c *Client) DeleteWorklog(issueKey, worklogID string) error {
 	return err
 }
 
-
 // jiraHTTPError produces a user-friendly error for common Jira API HTTP status codes.
 func jiraHTTPError(method, path string, status int, body []byte) error {
-switch status {
-case 401:
-return fmt.Errorf("Jira credentials rejected (401 Unauthorized) — your API token may have expired or been revoked. Re-enter it in Settings.")
-case 403:
-return fmt.Errorf("Jira access denied (403 Forbidden) — your token lacks the required scopes (read:jira-work, write:jira-work). Create a new token with those scopes.")
-case 404:
-return fmt.Errorf("Jira resource not found (404) for %s %s — check the Jira base URL in Settings", method, path)
-case 429:
-return fmt.Errorf("Jira rate limit hit (429 Too Many Requests) — please wait a moment and try again")
-case 503, 502:
-return fmt.Errorf("Jira is temporarily unavailable (%d) — check https://status.atlassian.com and try again later", status)
-default:
-detail := strings.TrimSpace(string(body))
-if len(detail) > 200 {
-detail = detail[:200] + "…"
-}
-return fmt.Errorf("Jira %s %s: unexpected status %d: %s", method, path, status, detail)
-}
+	switch status {
+	case 401:
+		return fmt.Errorf("Jira credentials rejected (401 Unauthorized) — your API token may have expired or been revoked. Re-enter it in Settings.")
+	case 403:
+		return fmt.Errorf("Jira access denied (403 Forbidden) — your token lacks the required scopes (read:jira-work, write:jira-work). Create a new token with those scopes.")
+	case 404:
+		return fmt.Errorf("Jira resource not found (404) for %s %s — check the Jira base URL in Settings", method, path)
+	case 429:
+		return fmt.Errorf("Jira rate limit hit (429 Too Many Requests) — please wait a moment and try again")
+	case 503, 502:
+		return fmt.Errorf("Jira is temporarily unavailable (%d) — check https://status.atlassian.com and try again later", status)
+	default:
+		detail := strings.TrimSpace(string(body))
+		if len(detail) > 200 {
+			detail = detail[:200] + "…"
+		}
+		return fmt.Errorf("Jira %s %s: unexpected status %d: %s", method, path, status, detail)
+	}
 }

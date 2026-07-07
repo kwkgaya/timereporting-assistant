@@ -86,6 +86,7 @@ type Server struct {
 	planBuilder PlanBuilder     // called on reload to rebuild day plans
 	dayBuilder  DayBuilder      // called to build a single day on demand
 	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
+	appVersion  string          // set via WithVersion; shown in Settings footer
 }
 
 // New creates a Server.
@@ -125,6 +126,9 @@ func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
 	s.mu.Unlock()
 	return s
 }
+
+// WithVersion stores the running app version for display in the UI.
+func (s *Server) WithVersion(v string) *Server { s.appVersion = v; return s }
 
 // WithDayBuilder attaches the on-demand single-day builder.
 func (s *Server) WithDayBuilder(fn DayBuilder) *Server {
@@ -186,7 +190,40 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /wizard", s.handleWizard)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /", s.handleIndex)
-	return mux
+	return csrfMiddleware(mux, s.port)
+}
+
+// csrfMiddleware rejects state-changing requests (POST/PUT/DELETE/PATCH) that
+// do not originate from the app's own localhost origin. Browsers always send
+// an Origin or Referer header on cross-origin requests, so a missing or
+// mismatched header on a mutating method is a reliable CSRF signal.
+// Plain GET/HEAD requests and requests with no Origin/Referer are allowed
+// (curl / non-browser clients need to work).
+func csrfMiddleware(next http.Handler, port int) http.Handler {
+	allowed := fmt.Sprintf("http://localhost:%d", port)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			origin := r.Header.Get("Origin")
+			referer := r.Header.Get("Referer")
+			// Allow if no Origin/Referer (non-browser client such as curl).
+			if origin == "" && referer == "" {
+				break
+			}
+			ok := false
+			if origin != "" && origin == allowed {
+				ok = true
+			}
+			if !ok && strings.HasPrefix(referer, allowed) {
+				ok = true
+			}
+			if !ok {
+				http.Error(w, "CSRF: request origin not allowed", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ── Settings API ─────────────────────────────────────────────────────────────
@@ -208,9 +245,11 @@ type configView struct {
 	Target         string   `json:"target"`
 	// Pointers so a partial PUT (e.g. the wizard's final step) can omit these
 	// without resetting them to false.
-	AutoUpdate            *bool `json:"autoUpdate,omitempty"`
-	UpdatePrerelease      *bool `json:"updatePrerelease,omitempty"`
-	LogMeetingsSeparately *bool `json:"logMeetingsSeparately,omitempty"`
+	AutoUpdate            *bool  `json:"autoUpdate,omitempty"`
+	UpdatePrerelease      *bool  `json:"updatePrerelease,omitempty"`
+	LogMeetingsSeparately *bool  `json:"logMeetingsSeparately,omitempty"`
+	ReportFrom            string `json:"reportFrom,omitempty"`
+	ReportTo              string `json:"reportTo,omitempty"`
 }
 
 func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
@@ -232,6 +271,8 @@ func (s *Server) apiGetConfig(w http.ResponseWriter, _ *http.Request) {
 		AutoUpdate:            &cfg.AutoUpdate,
 		UpdatePrerelease:      &cfg.UpdatePrerelease,
 		LogMeetingsSeparately: &cfg.LogMeetingsSeparately,
+		ReportFrom:            cfg.ReportFrom,
+		ReportTo:              cfg.ReportTo,
 	})
 }
 
@@ -290,6 +331,9 @@ func (s *Server) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	if v.LogMeetingsSeparately != nil {
 		s.cfg.LogMeetingsSeparately = *v.LogMeetingsSeparately
 	}
+	// ReportFrom/ReportTo may be empty (to clear/reset to auto-default).
+	s.cfg.ReportFrom = v.ReportFrom
+	s.cfg.ReportTo = v.ReportTo
 	cfg := s.cfg
 	cfgPath := s.cfgPath
 	s.mu.Unlock()
@@ -692,7 +736,7 @@ func (s *Server) handleCalendarGuide(w http.ResponseWriter, _ *http.Request) {
 // handleSettings serves the settings/onboarding page.
 func (s *Server) handleSettings(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(buildSettingsHTML()))
+	_, _ = w.Write([]byte(buildSettingsHTML(s.appVersion)))
 }
 
 // ── apiUpdateExisting edits an existing (already-logged) worklog's minutes and comment.
@@ -2035,7 +2079,10 @@ func buildCalendarGuideHTML() string {
 }
 
 // buildSettingsHTML returns the settings/onboarding HTML with screenshots inlined.
-func buildSettingsHTML() string {
+func buildSettingsHTML(appVersion string) string {
+	if appVersion == "" {
+		appVersion = "dev"
+	}
 	return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -2209,6 +2256,21 @@ button.secondary:hover{background:#f4f5f7}
       <input type="number" id="webPort" min="1024" max="65535">
     </div>
   </div>
+  <div class="row">
+    <div class="field">
+      <label>Report from (YYYY-MM-DD)
+        <span style="font-size:.78rem;color:#6b778c;margin-left:6px">leave blank for auto (first of last month)</span>
+      </label>
+      <input type="text" id="reportFrom" placeholder="2026-06-01" pattern="\d{4}-\d{2}-\d{2}">
+    </div>
+    <div class="field">
+      <label>Report to (YYYY-MM-DD)
+        <span style="font-size:.78rem;color:#6b778c;margin-left:6px">leave blank for auto (today)</span>
+      </label>
+      <input type="text" id="reportTo" placeholder="2026-06-30" pattern="\d{4}-\d{2}-\d{2}">
+    </div>
+  </div>
+  <div class="hint" style="margin-bottom:12px">Changes to the date range take effect the next time the app starts.</div>
   <div style="margin:12px 0;padding:12px 14px;background:#f4f5f7;border-radius:6px;border:1px solid #dfe1e6">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.88rem">
       <input type="checkbox" id="logMeetingsSeparately" style="width:16px;height:16px">
@@ -2230,6 +2292,7 @@ button.secondary:hover{background:#f4f5f7}
 </section>
 
 </main>
+<footer style="text-align:center;padding:16px;font-size:.75rem;color:#97a0af">Timereporting Assistant ` + appVersion + ` &mdash; <a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md" target="_blank" style="color:#97a0af">Troubleshooting</a></footer>
 
 <!-- Lightbox -->
 <div id="lightbox" onclick="closeLightbox()">
@@ -2292,6 +2355,8 @@ async function loadConfig() {
     document.getElementById('logMeetingsSeparately').checked = c.logMeetingsSeparately!==false;
     document.getElementById('autoUpdate').checked = c.autoUpdate!==false;
     document.getElementById('updatePrerelease').checked = c.updatePrerelease===true;
+    document.getElementById('reportFrom').value = c.reportFrom||'';
+    document.getElementById('reportTo').value = c.reportTo||'';
   } catch(e) { toast('Could not load config: '+e.message, true); }
 }
 
@@ -2323,6 +2388,8 @@ async function saveConfig() {
       logMeetingsSeparately: document.getElementById('logMeetingsSeparately').checked,
       autoUpdate: document.getElementById('autoUpdate').checked,
       updatePrerelease: document.getElementById('updatePrerelease').checked,
+      reportFrom: document.getElementById('reportFrom').value.trim(),
+      reportTo: document.getElementById('reportTo').value.trim(),
     });
     document.getElementById('cfg-msg').textContent = '✅ Saved';
     document.getElementById('cfg-msg').style.color = '#00875a';

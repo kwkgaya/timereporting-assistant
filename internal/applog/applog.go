@@ -8,14 +8,40 @@
 package applog
 
 import (
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 )
 
 // maxLogBytes is the size at which the log file is truncated on the next start.
 const maxLogBytes = 5 << 20 // 5 MiB
+
+// tokenPattern matches Atlassian API token shapes and generic bearer/basic
+// credential fragments so they are never written to the log file.
+var tokenPattern = regexp.MustCompile(
+	`(?i)(ATATT[A-Za-z0-9+/=_-]{20,}` + // Atlassian scoped token prefix
+		`|ATCTT[A-Za-z0-9+/=_-]{20,}` + // Atlassian classic token prefix
+		`|ghp_[A-Za-z0-9]{30,}` + // GitHub PAT (classic)
+		`|github_pat_[A-Za-z0-9_]{30,}` + // GitHub PAT (fine-grained)
+		`|Bearer\s+[A-Za-z0-9._~+/-]{20,}` + // Bearer token in header logs
+		`|:[A-Za-z0-9+/]{30,}@)`, // Basic-auth password in URL
+)
+
+// scrubWriter wraps an io.Writer and masks credential patterns before writing.
+type scrubWriter struct{ w io.Writer }
+
+func (s scrubWriter) Write(p []byte) (int, error) {
+	scrubbed := tokenPattern.ReplaceAll(p, []byte("[REDACTED]"))
+	n, err := s.w.Write(scrubbed)
+	// Return the original length so callers don't think a short write occurred.
+	if n == len(scrubbed) {
+		n = len(p)
+	}
+	return n, err
+}
 
 // LogDir returns the directory where log files are written.
 func LogDir() string {
@@ -47,9 +73,10 @@ func Setup(component string) func() {
 		return func() {}
 	}
 
+	sw := scrubWriter{f}
 	os.Stdout = f
 	os.Stderr = f
-	log.SetOutput(f)
+	log.SetOutput(sw)
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[" + component + "] ")
 	log.Printf("=== %s started (pid %d) ===", component, os.Getpid())

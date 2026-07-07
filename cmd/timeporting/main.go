@@ -124,6 +124,13 @@ func runMain() {
 	// shows days up to today so future days never appear in the list.
 	startDate := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
 	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// Config-persisted range overrides built-in default (CLI flags override both).
+	if *from == "" && cfg.ReportFrom != "" {
+		*from = cfg.ReportFrom
+	}
+	if *to == "" && cfg.ReportTo != "" {
+		*to = cfg.ReportTo
+	}
 	if *from != "" {
 		startDate, err = time.Parse("2006-01-02", *from)
 		if err != nil {
@@ -376,6 +383,7 @@ func runMain() {
 	// ── Web review UI ──────────────────────────────────────────────────────
 	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
 		WithConfig(cfg, *cfgPath).
+		WithVersion(version).
 		WithPlanBuilder(web.PlanBuilder(buildPlans)).
 		WithDayBuilder(web.DayBuilder(buildDay)).
 		WithPendingDays(pendingDates)
