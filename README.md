@@ -45,6 +45,10 @@ Requires Go 1.24+. The installer is built by CI on every release tag via .github
 
 The app communicates only with the Jira and GitHub endpoints you configure, using credentials you provide. No data is sent anywhere else.
 
+## Contributing
+
+Bug reports, ideas, and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
 MIT
