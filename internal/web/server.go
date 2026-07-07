@@ -2242,10 +2242,16 @@ button.secondary:hover{background:#f4f5f7}
 <script>
 function toast(msg, err) {
   const el = document.getElementById('toast');
-  el.textContent = msg;
+  if (err) {
+    el.innerHTML = msg
+      + ' &nbsp;<a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md"'
+      + ' target="_blank" style="color:#fff;text-decoration:underline;font-size:.8em">Troubleshooting ↗</a>';
+  } else {
+    el.textContent = msg;
+  }
   el.style.background = err ? '#de350b' : '#172b4d';
   el.style.display = 'block';
-  setTimeout(() => el.style.display='none', 3500);
+  setTimeout(() => el.style.display='none', err ? 8000 : 3500);
 }
 function togglePwd(id, btn) {
   const el = document.getElementById(id);
@@ -2500,10 +2506,16 @@ async function api(method, path, body) {
 
 function toast(msg, err) {
   const el = document.getElementById('toast');
-  el.textContent = msg;
+  if (err) {
+    el.innerHTML = msg
+      + ' &nbsp;<a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md"'
+      + ' target="_blank" style="color:#fff;text-decoration:underline;font-size:.8em">Troubleshooting ↗</a>';
+  } else {
+    el.textContent = msg;
+  }
   el.style.background = err ? '#de350b' : '#172b4d';
   el.style.display = 'block';
-  setTimeout(() => el.style.display='none', 3500);
+  setTimeout(() => el.style.display='none', err ? 8000 : 3500);
 }
 
 function hm(mins) {
@@ -2763,7 +2775,8 @@ function renderDetail(day) {
 
   // Notes (below the suggested worklogs)
   if (day.notes && day.notes.length) {
-    html += '<div class="notes" style="margin-top:14px">ℹ️ '+day.notes.join(' | ')+'</div>';
+    html += '<div class="notes" style="margin-top:14px">ℹ️ '+day.notes.join(' | ')
+      +' &nbsp;<a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md" target="_blank" style="font-size:.78rem;color:#6b778c">Troubleshooting ↗</a></div>';
   }
 
   // Unassigned activity + Rovo prompt (#12) — below the suggested worklogs

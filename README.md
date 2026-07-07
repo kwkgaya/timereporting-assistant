@@ -49,6 +49,10 @@ The app communicates only with the Jira and GitHub endpoints you configure, usin
 
 Bug reports, ideas, and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+## Troubleshooting
+
+See [Troubleshooting.md](Troubleshooting.md) for help with common issues: expired tokens, calendar not loading, missing activity, installer problems, and more.
+
 ## License
 
 MIT

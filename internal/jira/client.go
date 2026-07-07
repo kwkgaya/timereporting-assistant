@@ -1,4 +1,4 @@
-// Package jira is a small client for the Jira Cloud REST v3 API. The same
+﻿// Package jira is a small client for the Jira Cloud REST v3 API. The same
 // client points at either the real Jira instance or the local mock server,
 // depending on the base URL and credentials it is constructed with.
 package jira
@@ -60,14 +60,14 @@ func ResolveAPIBase(baseURL, email, token string) (string, error) {
 		return base, nil
 	}
 
-	// Second try: scoped token needs cloudId → api.atlassian.com base URL.
+	// Second try: scoped token needs cloudId â†’ api.atlassian.com base URL.
 	cloudID, err := fetchCloudID(httpClient, base)
 	if err != nil {
 		return "", fmt.Errorf("could not resolve Jira cloud ID from %s: %w", base, err)
 	}
 	apiBase := "https://api.atlassian.com/ex/jira/" + cloudID
 	if err := tryMyself(httpClient, apiBase, email, token); err != nil {
-		return "", fmt.Errorf("authentication failed with scoped token at %s — ensure the token has 'read:jira-work' and 'write:jira-work' scopes and was copied in full", apiBase)
+		return "", fmt.Errorf("authentication failed with scoped token at %s â€” ensure the token has 'read:jira-work' and 'write:jira-work' scopes and was copied in full", apiBase)
 	}
 	return apiBase, nil
 }
@@ -89,7 +89,7 @@ func tryMyself(client *http.Client, base, email, token string) error {
 	}
 	// "scope does not match" on /myself means auth passed but the /myself endpoint
 	// isn't in scope (read:me was not granted). For our purposes (read/write worklogs)
-	// this is fine — consider auth validated.
+	// this is fine â€” consider auth validated.
 	if resp.StatusCode == http.StatusUnauthorized {
 		var body struct {
 			Message string `json:"message"`
@@ -98,13 +98,17 @@ func tryMyself(client *http.Client, base, email, token string) error {
 		if strings.Contains(strings.ToLower(body.Message), "scope") {
 			return nil // auth valid; /myself just not in token scope
 		}
+		return fmt.Errorf("invalid credentials (401) â€” check your Jira email and API token in Settings")
 	}
-	return fmt.Errorf("status %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("access denied (403) â€” your token may lack the required scopes (read:jira-work, write:jira-work)")
+	}
+	return fmt.Errorf("unexpected status %d â€” check the Jira base URL and try again", resp.StatusCode)
 }
 
 // setAuth sets the correct Authorization header.
 // Both classic and scoped Atlassian API tokens use Basic auth (email:token).
-// Bearer is NOT used — the api.atlassian.com URL uses Basic auth too.
+// Bearer is NOT used â€” the api.atlassian.com URL uses Basic auth too.
 func setAuth(req *http.Request, base, email, token string) {
 	if email != "" && token != "" {
 		auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
@@ -169,7 +173,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return data, fmt.Errorf("jira %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return data, jiraHTTPError(method, path, resp.StatusCode, data)
 	}
 	return data, nil
 }
@@ -194,7 +198,7 @@ func (c *Client) GetIssue(key string) (Issue, error) {
 
 // SearchIssues runs a JQL query and returns matching issues (key + summary).
 // Uses POST /rest/api/3/search/jql as required by Jira Cloud since mid-2025
-// (the old GET /rest/api/3/search was removed — see CHANGE-2046).
+// (the old GET /rest/api/3/search was removed â€” see CHANGE-2046).
 func (c *Client) SearchIssues(jql string) ([]Issue, error) {
 	body := map[string]any{
 		"jql":        jql,
@@ -366,4 +370,27 @@ func (c *Client) DeleteWorklog(issueKey, worklogID string) error {
 	path := "/rest/api/3/issue/" + url.PathEscape(issueKey) + "/worklog/" + url.PathEscape(worklogID)
 	_, err := c.do(http.MethodDelete, path, nil)
 	return err
+}
+
+
+// jiraHTTPError produces a user-friendly error for common Jira API HTTP status codes.
+func jiraHTTPError(method, path string, status int, body []byte) error {
+switch status {
+case 401:
+return fmt.Errorf("Jira credentials rejected (401 Unauthorized) — your API token may have expired or been revoked. Re-enter it in Settings.")
+case 403:
+return fmt.Errorf("Jira access denied (403 Forbidden) — your token lacks the required scopes (read:jira-work, write:jira-work). Create a new token with those scopes.")
+case 404:
+return fmt.Errorf("Jira resource not found (404) for %s %s — check the Jira base URL in Settings", method, path)
+case 429:
+return fmt.Errorf("Jira rate limit hit (429 Too Many Requests) — please wait a moment and try again")
+case 503, 502:
+return fmt.Errorf("Jira is temporarily unavailable (%d) — check https://status.atlassian.com and try again later", status)
+default:
+detail := strings.TrimSpace(string(body))
+if len(detail) > 200 {
+detail = detail[:200] + "…"
+}
+return fmt.Errorf("Jira %s %s: unexpected status %d: %s", method, path, status, detail)
+}
 }
