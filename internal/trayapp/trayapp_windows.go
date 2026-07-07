@@ -21,7 +21,10 @@ import (
 	"time"
 	"unsafe"
 
+	"sync"
+
 	"fyne.io/systray"
+	webview "github.com/jchv/go-webview2"
 	"golang.org/x/sys/windows/registry"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/applog"
@@ -106,7 +109,7 @@ func onReady(version, cfgPath string) {
 		select {
 		case <-mOpenReport.ClickedCh:
 			ensureServerRunning(cfg)
-			openBrowser(webURL)
+			openAppWindow("Timereporting Assistant", webURL)
 		case <-mOpenLogs.ClickedCh:
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
@@ -428,7 +431,78 @@ func setIcon() {
 	systray.SetIcon(appIconPNG)
 }
 
-// openBrowser opens url in the default browser.
+// openAppWindow opens a native WebView2 window showing the given URL.
+// If WebView2 runtime is not available it falls back to the system browser.
+// Only one window exists at a time; clicking the tray item while the window
+// is already open restores and focuses it instead of opening a second one.
+var (
+	webviewMu   sync.Mutex
+	webviewHWND uintptr // 0 when no window is open
+)
+
+var (
+	user32               = syscall.NewLazyDLL("user32.dll")
+	procSetForeground    = user32.NewProc("SetForegroundWindow")
+	procShowWindow       = user32.NewProc("ShowWindow")
+	procIsWindow         = user32.NewProc("IsWindow")
+	procBringWindowToTop = user32.NewProc("BringWindowToTop")
+)
+
+const swRestore = 9
+
+func bringWindowToFront(hwnd uintptr) {
+	procShowWindow.Call(hwnd, swRestore)
+	procSetForeground.Call(hwnd)
+	procBringWindowToTop.Call(hwnd)
+}
+
+func openAppWindow(title, url string) {
+	webviewMu.Lock()
+	hwnd := webviewHWND
+	webviewMu.Unlock()
+
+	// If a window already exists, bring it to the front.
+	if hwnd != 0 {
+		alive, _, _ := procIsWindow.Call(hwnd)
+		if alive != 0 {
+			bringWindowToFront(hwnd)
+			return
+		}
+		// Window handle is stale — reset and open a new one.
+		webviewMu.Lock()
+		webviewHWND = 0
+		webviewMu.Unlock()
+	}
+
+	go func() {
+		defer func() {
+			webviewMu.Lock()
+			webviewHWND = 0
+			webviewMu.Unlock()
+		}()
+
+		w := webview.New(false)
+		if w == nil {
+			// WebView2 runtime not available — fall back to system browser.
+			log.Printf("WebView2 not available, opening system browser")
+			openBrowser(url)
+			return
+		}
+		defer w.Destroy()
+		w.SetTitle(title)
+		w.SetSize(1280, 860, webview.HintNone)
+
+		// Store the HWND so we can focus the window on subsequent tray clicks.
+		webviewMu.Lock()
+		webviewHWND = uintptr(w.Window())
+		webviewMu.Unlock()
+
+		w.Navigate(url)
+		w.Run()
+	}()
+}
+
+// openBrowser opens url in the default system browser (fallback).
 func openBrowser(url string) {
 	if runtime.GOOS == "windows" {
 		_ = exec.Command("cmd", "/c", "start", "", url).Start()
