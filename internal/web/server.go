@@ -2311,6 +2311,7 @@ button.secondary:hover{background:#f4f5f7}
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="updatePrerelease" style="width:16px;height:16px">
       Include beta (prerelease) versions when updating
+      <span style="font-size:.78rem;color:#6b778c;margin-left:4px">— enable this to receive beta releases before they become stable</span>
     </label>
   </div>
 </section>

@@ -43,6 +43,113 @@ jobs:
           path: tests/ui/playwright-report/
           retention-days: 14
 
+  build-installer:
+    runs-on: windows-latest
+    # Build and publish even if UI tests fail so beta testers can still install.
+    if: always()
+    needs: ui-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: echo "version=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
+
+      - name: Verify module checksums
+        shell: pwsh
+        run: |
+          go mod verify
+          go mod tidy
+          if (git diff --quiet go.sum) { Write-Host "go.sum clean" } else { Write-Error "go.sum changed after go mod tidy — commit the updated go.sum"; exit 1 }
+
+      - name: Build binaries
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # Embed app icon into tray.exe using go-winres.
+          $iconSrc = "internal/trayapp/assets/icon.ico"
+          $winresDir = "cmd/tray/winres"
+          Copy-Item $iconSrc "$winresDir/icon.ico"
+          go run github.com/tc-hib/go-winres@latest make --in "$winresDir/winres.json" --out "cmd/tray/"
+          go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\timeporting.exe .\cmd\timeporting
+          go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\mockjira.exe .\cmd\mockjira
+          go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\tray.exe .\cmd\tray
+          Copy-Item config.example.json dist\
+          Copy-Item README.md dist\
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=$v" "/DDistDir=$($PWD.Path)\dist" build\installer\timereporting.iss
+          Get-ChildItem dist\*.exe | ForEach-Object { Write-Host $_.Name }
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\TimereportingAssistant-Setup-*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding UTF8
+            Write-Host "$($_.Name).sha256: $hash"
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Timereporting Assistant ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/TimereportingAssistant-Setup-*.exe
+            dist/TimereportingAssistant-Setup-*.exe.sha256
+
+jobs:
+  ui-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright
+        working-directory: tests/ui
+        shell: pwsh
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run UI tests
+        working-directory: tests/ui
+        shell: pwsh
+        run: npx playwright test
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/ui/playwright-report/
+          retention-days: 14
+
 jobs:
   build-installer:
     runs-on: windows-latest
