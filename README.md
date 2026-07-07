@@ -22,10 +22,9 @@ The wizard walks you through connecting your Jira account, GitHub token, calenda
 
 ## Calendar integration
 
-| Option | How |
-|---|---|
-| **Published URL** *(recommended)* | Outlook → File → Settings → Calendar → Shared calendars → Publish → copy the ICS link. The app fetches it live. |
-| **Local export** | File → Save Calendar → More Options → Full details, All dates. Upload in Settings. |
+Paste a published ICS URL in Settings. Outlook: **File → Settings → Calendar → Shared calendars → Publish** → copy the ICS link. The app fetches it live.
+
+See the in-app guide (**Settings → Calendar URL → ?**) for step-by-step screenshots.
 
 ## Configuration
 
