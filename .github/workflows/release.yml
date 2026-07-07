@@ -9,6 +9,41 @@ permissions:
   contents: write
 
 jobs:
+  ui-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright
+        working-directory: tests/ui
+        shell: pwsh
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run UI tests
+        working-directory: tests/ui
+        shell: pwsh
+        run: npx playwright test
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/ui/playwright-report/
+          retention-days: 14
+
+jobs:
   build-installer:
     runs-on: windows-latest
     steps:

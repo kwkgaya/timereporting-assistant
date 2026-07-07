@@ -18,6 +18,12 @@ config.local.json
 *.local.json
 .env
 
+# UI test artifacts
+tests/ui/node_modules/
+tests/ui/playwright-report/
+tests/ui/test-results/
+.tmp-test-bin/
+
 # User data: calendar exports, generated drafts
 /data/
 /drafts/
