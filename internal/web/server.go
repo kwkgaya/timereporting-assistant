@@ -188,6 +188,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/rows/{idx}/submit", s.apiSubmitRow)
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
+	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /guide/calendar-url", s.handleCalendarGuide)
 	mux.HandleFunc("GET /wizard", s.handleWizard)
