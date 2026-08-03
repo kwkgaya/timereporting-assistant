@@ -281,21 +281,50 @@ func countIncompleteDays(cfg config.Config) int {
 	return count
 }
 
-// serverStartMu serialises server startup so two concurrent callers (tray
-// click and reminder check) cannot each spawn a timeporting.exe.
-var serverStartMu sync.Mutex
+// startAttempt is one in-flight server start, shared by every caller that
+// arrives while it runs.
+type startAttempt struct {
+	done chan struct{}
+	err  error // read only after done is closed
+}
+
+var (
+	serverStartMu sync.Mutex
+	serverStart   *startAttempt // non-nil while a start is in flight
+)
 
 // ensureServerRunning starts timeporting if the review UI isn't already up.
 // It blocks (up to ~60s) until the web port is accepting connections so the
 // caller can open the browser without hitting a not-yet-listening port.
+// Concurrent callers (tray click and reminder check) join the same attempt
+// rather than queueing behind each other for another full startup.
 func ensureServerRunning(cfg config.Config) error {
-	serverStartMu.Lock()
-	defer serverStartMu.Unlock()
-
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.WebPort)
 	if portOpen(addr) {
 		return nil
 	}
+
+	serverStartMu.Lock()
+	if a := serverStart; a != nil {
+		serverStartMu.Unlock()
+		<-a.done
+		return a.err
+	}
+	a := &startAttempt{done: make(chan struct{})}
+	serverStart = a
+	serverStartMu.Unlock()
+
+	a.err = startServer(addr)
+
+	serverStartMu.Lock()
+	serverStart = nil
+	serverStartMu.Unlock()
+	close(a.done)
+	return a.err
+}
+
+// startServer spawns timeporting.exe and waits for it to listen on addr.
+func startServer(addr string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot locate the installation folder: %w", err)
@@ -310,18 +339,23 @@ func ensureServerRunning(cfg config.Config) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("could not start %s: %w", path, err)
 	}
-	log.Printf("ensureServerRunning: started %s (pid %d), waiting for %s", path, cmd.Process.Pid, addr)
+	pid := cmd.Process.Pid
+	log.Printf("startServer: started %s (pid %d), waiting for %s", path, pid, addr)
 
-	// The process exiting early is reported by the waiter below, so its result
-	// is collected here rather than left as a zombie.
+	// Reaps the child and records why it went away; it ends with the process.
+	// The buffer keeps it from blocking once the startup loop has moved on.
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		log.Printf("startServer: %s (pid %d) exited: %v", path, pid, err)
+		exited <- err
+	}()
 
 	// Wait for the server to finish building plans and start listening.
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if portOpen(addr) {
-			log.Printf("ensureServerRunning: %s is up", addr)
+			log.Printf("startServer: %s is up", addr)
 			return nil
 		}
 		select {
@@ -329,7 +363,6 @@ func ensureServerRunning(cfg config.Config) error {
 			if portOpen(addr) {
 				return nil
 			}
-			log.Printf("ensureServerRunning: %s exited early: %v", path, err)
 			return fmt.Errorf("the background service stopped during startup (%v) — see the logs for details", err)
 		case <-time.After(300 * time.Millisecond):
 		}
@@ -519,12 +552,21 @@ var (
 	procLoadImage        = user32.NewProc("LoadImageW")
 	procSendMessage      = user32.NewProc("SendMessageW")
 	procSetClassLongPtr  = user32.NewProc("SetClassLongPtrW")
+	procIsIconic         = user32.NewProc("IsIconic")
+	procGetForeground    = user32.NewProc("GetForegroundWindow")
+	procGetWindowThread  = user32.NewProc("GetWindowThreadProcessId")
+	procAttachThreadInpt = user32.NewProc("AttachThreadInput")
+	procSetActiveWindow  = user32.NewProc("SetActiveWindow")
 
-	kernel32        = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutex = kernel32.NewProc("CreateMutexW")
+	kernel32            = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutex     = kernel32.NewProc("CreateMutexW")
+	procCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 )
 
-const swRestore = 9
+const (
+	swRestore = 9
+	swShow    = 5
+)
 
 // Icons are loaded once and reused: WM_SETICON does not take ownership, so the
 // handles must stay alive for as long as any window uses them.
@@ -582,10 +624,40 @@ func setWindowIcon(hwnd uintptr) {
 	}
 }
 
+// bringWindowToFront un-minimises hwnd and puts it in front of everything.
+// Windows refuses SetForegroundWindow from a process that does not already own
+// the foreground window — a tray click leaves the shell in front, so the plain
+// call is silently downgraded to a taskbar flash. Attaching this thread's input
+// queue to the foreground thread for the duration is the documented way to lift
+// that restriction.
 func bringWindowToFront(hwnd uintptr) {
-	procShowWindow.Call(hwnd, swRestore)
-	procSetForeground.Call(hwnd)
+	// AttachThreadInput works on the calling OS thread, so it must not migrate.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if iconic, _, _ := procIsIconic.Call(hwnd); iconic != 0 {
+		procShowWindow.Call(hwnd, swRestore)
+	} else {
+		procShowWindow.Call(hwnd, swShow)
+	}
+
+	fg, _, _ := procGetForeground.Call()
+	if fg == hwnd {
+		return
+	}
+	ourThread, _, _ := procCurrentThreadID.Call()
+	fgThread, _, _ := procGetWindowThread.Call(fg, 0)
+	attached := false
+	if fgThread != 0 && fgThread != ourThread {
+		r, _, _ := procAttachThreadInpt.Call(ourThread, fgThread, 1)
+		attached = r != 0
+	}
 	procBringWindowToTop.Call(hwnd)
+	procSetForeground.Call(hwnd)
+	procSetActiveWindow.Call(hwnd)
+	if attached {
+		procAttachThreadInpt.Call(ourThread, fgThread, 0)
+	}
 }
 
 // splashHTML is shown while `wait` runs so the window is never a blank frame.

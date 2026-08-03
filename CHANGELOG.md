@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+
+## [0.33.0-beta.1] — 2026-08-03
 ### Added
 - Cancelled meetings are excluded from the day's time. A calendar entry whose title is a cancellation notice (`Cancelled - …`, `Canceled: …`) or that carries `STATUS:CANCELLED` no longer contributes suggested time. Titles that merely start with the word, such as "Cancelled flights follow-up", are kept — a separator is required. Cancelling a single occurrence of a recurring meeting removes only that day, not the series
 - The day summary line now reports a **Balance** — the time still missing from (or logged over) the 7h target. Balance replaces **Total**, so exactly one of the two is shown: Total only when the day lands exactly on target, Balance otherwise
@@ -13,6 +15,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - The review UI ignored the `workdayHours` setting: the daily target was hard-coded to 7h in the summary line, the "incomplete day" test, the "logged / 7h" labels and the default time for a new row. All of them now use the configured value, which the server injects into the page
+- "Open time report" did nothing when the window was already open behind other windows. Windows refuses `SetForegroundWindow` to a process that does not own the foreground window, so the request was downgraded to a taskbar flash; the window is now genuinely raised and focused
+- A tray click no longer waits behind the daily reminder check for a second full startup — both now join the same start attempt
+- An unexpected exit of the background service is written to the log instead of passing unnoticed
 
 ## [0.32.0-beta.3] — 2026-08-03
 ### Added
