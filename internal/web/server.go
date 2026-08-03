@@ -573,19 +573,46 @@ func (s *Server) apiSearchIssues(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	safe := jqlSafe.ReplaceAllString(q, " ")
-	jql := fmt.Sprintf(`text ~ "%s*" ORDER BY updated DESC`, strings.TrimSpace(safe))
+	safe := strings.TrimSpace(jqlSafe.ReplaceAllString(q, " "))
+	out := make([]map[string]string, 0, 10)
+	seen := map[string]bool{}
+	add := func(key, summary string) {
+		if key == "" || seen[key] || len(out) >= 10 {
+			return
+		}
+		seen[key] = true
+		out = append(out, map[string]string{"key": key, "summary": summary})
+	}
+
+	// `text ~` searches summary/description/comments and never matches an issue
+	// key, so a query that looks like a key is resolved directly first.
+	if jiraIssueKeyRE.MatchString(strings.ToUpper(safe)) {
+		if iss, err := client.GetIssue(strings.ToUpper(safe)); err == nil {
+			add(iss.Key, iss.Summary)
+		}
+	}
+
+	// "-" is reserved in Jira text search and makes the whole query fail, so it
+	// is dropped for the free-text part.
+	textTerm := strings.Join(strings.Fields(strings.ReplaceAll(safe, "-", " ")), " ")
+	if textTerm == "" {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	jql := fmt.Sprintf(`(summary ~ "%s*" OR text ~ "%s*") ORDER BY updated DESC`, textTerm, textTerm)
 	issues, err := client.SearchIssues(jql)
 	if err != nil {
+		// A direct key hit is still a useful result even if the text search fails.
+		if len(out) > 0 {
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	out := make([]map[string]string, 0, 10)
 	for _, iss := range issues {
-		out = append(out, map[string]string{"key": iss.Key, "summary": iss.Summary})
-		if len(out) >= 10 {
-			break
-		}
+		add(iss.Key, iss.Summary)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -2991,8 +3018,8 @@ function renderDetail(day) {
       html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
         +'<td>'+(submitted?'':'<button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
         +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
-        +'<td><input type="text" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:100%" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
-        +'<td><input type="text" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
+        +'<td><input type="text" id="time-'+day.date+'-'+i+'" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:100%" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
+        +'<td><input type="text" id="comment-'+day.date+'-'+i+'" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
         +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
         +'</tr>';
     });
@@ -3206,9 +3233,14 @@ function addRowWithKey(key) {
   const remaining = Math.max(30, 420 - existMins - suggMins);
   const defaultMins = Math.round(remaining / 30) * 30 || 30;
   day.suggested.push({issueKey:key, minutes:defaultMins, comment:'', category:'manual'});
+  const newIdx = day.suggested.length - 1;
   saveSuggested(currentDate, day.suggested);
   renderDetail(day);
   renderList();
+  // renderDetail rebuilds the table, so focus has to be restored explicitly;
+  // without this Tab restarts from the top of the document.
+  const t = document.getElementById('time-'+currentDate+'-'+newIdx);
+  if (t) { t.focus(); t.select(); }
 }
 
 function hideIssueResults() {
@@ -3275,6 +3307,16 @@ function onNewRowKey(ev, input) {
       if (v) addRowWithKey(v);
     }
     return;
+  }
+  if (ev.key === 'Tab' && box && box.style.display !== 'none') {
+    // Tab commits the highlighted (or sole) result instead of skipping past it.
+    const pick = active || (items.length === 1 ? items[0] : null);
+    if (pick) {
+      ev.preventDefault();
+      pick.dispatchEvent(new MouseEvent('mousedown'));
+      return;
+    }
+    hideIssueResults();
   }
   if (ev.key === 'Escape') {
     hideIssueResults();

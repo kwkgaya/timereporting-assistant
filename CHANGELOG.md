@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.32.0-beta.2] — 2026-08-03
+### Fixed
+- Issue picker could not find an issue by its key (e.g. `EDB-11549`). JQL's `text ~` clause only searches summary/description/comments and never matches a key, and the unescaped `-` made the whole query fail. Keys are now resolved with a direct issue lookup, the free-text search also covers `summary`, and a key hit survives a failed text search
+- Keyboard flow when adding a worklog: focus now moves to the Time box after picking an issue (the table is rebuilt on add, which previously dropped focus and made Tab restart from the top of the page), and Tab commits the highlighted search result
+
 ## [0.32.0-beta.1] — 2026-08-03
 ### Added
 - **Recurring calendar events are now expanded.** The ICS parser ignored `RRULE` entirely, so every repeating meeting — daily standups, weekly syncs, monthly retros — was silently dropped and most days looked like they had no meetings at all. Supports `FREQ=DAILY/WEEKLY/MONTHLY/YEARLY` with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (including ordinals such as `2TU` and `-1FR`), `BYMONTHDAY` and `BYSETPOS`, plus `EXDATE` exclusions and `RECURRENCE-ID` rescheduled instances
