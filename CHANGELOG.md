@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.31.0-beta.1] — 2026-08-03
+### Added
+- Calendar health warning: an amber banner is shown when the published calendar URL fails to load, when no calendar is configured, or when the calendar loads but contains no events (a revoked Outlook publish link still returns a valid but empty feed)
+
+### Fixed
+- Taskbar/Explorer/shortcut icons: the icon resource was never actually linked into any executable (`go-winres --out` takes a path prefix, and the emitted `_windows_amd64.syso` was ignored by the Go toolchain because of the leading underscore)
+- Window icon is also applied to the WebView2 window class, which the taskbar uses in preference to `WM_SETICON`
+- Installer, uninstall entry and shortcuts now carry the app icon
+- Branch name is now shown for commits found only in the git reflog
+
 ## [0.30.0-beta.1] — 2026-07-07
 ### Added
 - `--version` flag; version shown in Settings page footer and tray tooltip/menu

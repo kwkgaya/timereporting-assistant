@@ -92,6 +92,7 @@ type Server struct {
 	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
 	appVersion  string          // set via WithVersion; shown in Settings footer
 	credError   string          // non-empty when the last Jira auth attempt returned 401/403
+	calWarning  string          // non-empty when the calendar failed to load or had no events
 }
 
 // New creates a Server.
@@ -144,6 +145,15 @@ func (s *Server) WithVersion(v string) *Server {
 func (s *Server) WithCredentialError(msg string) *Server {
 	s.mu.Lock()
 	s.credError = msg
+	s.mu.Unlock()
+	return s
+}
+
+// WithCalendarWarning records a calendar load problem to surface in the UI.
+// Must not be called from the day builder — that runs with s.mu already held.
+func (s *Server) WithCalendarWarning(msg string) *Server {
+	s.mu.Lock()
+	s.calWarning = msg
 	s.mu.Unlock()
 	return s
 }
@@ -886,6 +896,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"activeWrite":   s.activeWrite,
 		"realAvailable": s.jiraClient != nil,
 		"credError":     s.credError,
+		"calWarning":    s.calWarning,
 	})
 }
 
@@ -2571,6 +2582,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .badge-target{background:#ff991f;color:#172b4d;padding:2px 8px;border-radius:12px;font-size:.75rem}
 #toast{position:fixed;bottom:20px;right:20px;background:#172b4d;color:#fff;padding:10px 18px;border-radius:6px;display:none;font-size:.85rem;z-index:999}
 #cred-banner{display:none;background:#FF5630;color:#fff;padding:8px 20px;font-size:.85rem;align-items:center;gap:10px}
+#cal-banner{display:none;background:#FFAB00;color:#172b4d;padding:8px 20px;font-size:.85rem;align-items:center;gap:10px}
 #day-overlay{position:fixed;inset:0;background:rgba(255,255,255,.88);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:600}
 .spinner{width:52px;height:52px;border:5px solid #dfe1e6;border-top-color:#0052cc;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -2591,6 +2603,10 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 <div id="cred-banner">
   ⚠️ Jira credentials error: <span id="cred-banner-msg"></span>
   &nbsp;<a href="/settings" style="color:#fff;font-weight:700;margin-left:auto">Fix in Settings →</a>
+</div>
+<div id="cal-banner">
+  ⚠️ Calendar: <span id="cal-banner-msg"></span>
+  &nbsp;<a href="/settings" style="color:#172b4d;font-weight:700;margin-left:auto">Fix in Settings →</a>
 </div>
 <main>
   <div id="incomplete-panel">
@@ -3324,6 +3340,10 @@ async function init() {
     if (st.credError) {
       document.getElementById('cred-banner-msg').textContent = st.credError;
       document.getElementById('cred-banner').style.display = 'flex';
+    }
+    if (st.calWarning) {
+      document.getElementById('cal-banner-msg').textContent = st.calWarning;
+      document.getElementById('cal-banner').style.display = 'flex';
     }
   } catch(_) {}
   try {

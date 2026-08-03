@@ -208,8 +208,10 @@ func runMain() {
 			}
 		}
 
-		var meetings []model.Meeting
-		meetings, _ = loadMeetings(c)
+		meetings, merr := loadMeetings(c)
+		if webSrv != nil {
+			webSrv.WithCalendarWarning(calendarWarning(c, meetings, merr))
+		}
 
 		gc := activity.NewGitCollector(c.LocalRepos, c.GitAuthors)
 		var ghc *activity.GitHubCollector
@@ -398,6 +400,11 @@ func runMain() {
 	if startupCredErr != "" {
 		webSrv.WithCredentialError(startupCredErr)
 	}
+	// Checked in the background so a slow or dead ICS URL does not delay startup.
+	go func() {
+		m, err := loadMeetings(cfg)
+		webSrv.WithCalendarWarning(calendarWarning(cfg, m, err))
+	}()
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 
@@ -516,6 +523,23 @@ func loadMeetings(c config.Config) ([]model.Meeting, error) {
 		return ics.ParseFile(c.ICSPath)
 	}
 	return nil, nil
+}
+
+// calendarWarning describes a calendar problem for the UI banner, or "" when the
+// calendar looks healthy. An empty calendar is treated as a problem because a
+// published Outlook URL that has been revoked still returns a valid but empty
+// feed, and virtually every working day has at least one event.
+func calendarWarning(c config.Config, meetings []model.Meeting, err error) string {
+	if c.ICSUrl == "" && c.ICSPath == "" {
+		return "No calendar configured — meeting time will not be logged automatically."
+	}
+	if err != nil {
+		return "Could not load your calendar: " + err.Error()
+	}
+	if len(meetings) == 0 {
+		return "Your calendar loaded but contained no events. The published URL may have expired — re-publish the calendar in Outlook and paste the new URL."
+	}
+	return ""
 }
 
 // jiraAssignedActivities converts Jira issues into synthetic Activity values// so the engine can distribute time across them when no code activity is found.
