@@ -132,7 +132,12 @@ func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
 }
 
 // WithVersion stores the running app version for display in the UI.
-func (s *Server) WithVersion(v string) *Server { s.appVersion = v; return s }
+func (s *Server) WithVersion(v string) *Server {
+	s.mu.Lock()
+	s.appVersion = v
+	s.mu.Unlock()
+	return s
+}
 
 // WithCredentialError records a Jira auth failure message to surface in the UI.
 func (s *Server) WithCredentialError(msg string) *Server {
@@ -165,8 +170,9 @@ func (s *Server) WithPendingDays(dates []string) *Server {
 	return s
 }
 
-// writeClient returns the jira client for the current active write target.
-func (s *Server) writeClient() (*jira.Client, string, error) {
+// writeClientLocked returns the jira client for the current active write
+// target. Caller must hold s.mu.
+func (s *Server) writeClientLocked() (*jira.Client, string, error) {
 	if s.activeWrite == "real" {
 		if s.jiraClient == nil {
 			return nil, "", fmt.Errorf("no Jira credentials configured")
@@ -756,8 +762,11 @@ func (s *Server) handleCalendarGuide(w http.ResponseWriter, _ *http.Request) {
 
 // handleSettings serves the settings/onboarding page.
 func (s *Server) handleSettings(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	ver := s.appVersion
+	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(buildSettingsHTML(s.appVersion)))
+	_, _ = w.Write([]byte(buildSettingsHTML(ver)))
 }
 
 // ── apiUpdateExisting edits an existing (already-logged) worklog's minutes and comment.
@@ -785,7 +794,9 @@ func (s *Server) apiUpdateExisting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	day, _ := time.Parse("2006-01-02", date)
-	client, _, cerr := s.writeClient()
+	s.mu.Lock()
+	client, _, cerr := s.writeClientLocked()
+	s.mu.Unlock()
 	if cerr != nil {
 		writeErr(w, http.StatusBadRequest, cerr.Error())
 		return
@@ -840,7 +851,9 @@ func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
 		_ = author // real-Jira guard: let Jira return 403 if the user doesn't own it.
 	}
 
-	client, _, cerr := s.writeClient()
+	s.mu.Lock()
+	client, _, cerr := s.writeClientLocked()
+	s.mu.Unlock()
 	if cerr != nil {
 		writeErr(w, http.StatusBadRequest, cerr.Error())
 		return
@@ -866,7 +879,7 @@ func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, write, _ := s.writeClient()
+	_, write, _ := s.writeClientLocked()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"write":         write,
 		"activeWrite":   s.activeWrite,
@@ -1062,7 +1075,11 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	started := model.WorklogStart(day)
 
 	s.mu.Lock()
-	client, writeLabel, cerr := s.writeClient()
+	client, writeLabel, cerr := s.writeClientLocked()
+	src := "real"
+	if s.activeWrite == "mock" {
+		src = "mock"
+	}
 	s.mu.Unlock()
 	if cerr != nil {
 		writeErr(w, http.StatusBadRequest, cerr.Error())
@@ -1095,12 +1112,7 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 				return
 			} else {
 				wl.ID = id.ID
-				wl.Source = writeLabel // "Mock Jira" or "Jira"
-				if s.activeWrite == "mock" {
-					wl.Source = "mock"
-				} else {
-					wl.Source = "real"
-				}
+				wl.Source = src
 			}
 			alreadyLogged[fingerprint] = true
 		}
@@ -1109,10 +1121,6 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 
 	if !body.DryRun {
 		// Move submitted worklogs to Existing, remove them from Suggested.
-		src := "real"
-		if s.activeWrite == "mock" {
-			src = "mock"
-		}
 		s.mu.Lock()
 		for i := range submitted {
 			submitted[i].Category = string(model.CategoryExisting)
@@ -1193,7 +1201,12 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 	started := model.WorklogStart(day)
 
 	s.mu.Lock()
-	client, writeLabel, cerr := s.writeClient()
+	client, writeLabel, cerr := s.writeClientLocked()
+	// Determine the source label for the new existing worklog.
+	src := "real"
+	if s.activeWrite == "mock" {
+		src = "mock"
+	}
 	s.mu.Unlock()
 	if cerr != nil {
 		writeErr(w, http.StatusBadRequest, cerr.Error())
@@ -1204,12 +1217,6 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("submit row: %v", err))
 		return
-	}
-
-	// Determine the source label for the new existing worklog.
-	src := "real"
-	if s.activeWrite == "mock" {
-		src = "mock"
 	}
 
 	s.mu.Lock()

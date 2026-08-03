@@ -196,9 +196,11 @@ func (c *Checker) Download(r *Release, destDir string) (string, error) {
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
 		f.Close()
+		_ = os.Remove(dest)
 		return "", err
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(dest)
 		return "", err
 	}
 	// Verify checksum if a .sha256 asset was published with this release.
@@ -220,6 +222,9 @@ func (c *Checker) verifyChecksum(checksumURL, gotHex string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("fetch checksum %s: status %d", checksumURL, resp.StatusCode)
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 256))
 	if err != nil {
 		return err

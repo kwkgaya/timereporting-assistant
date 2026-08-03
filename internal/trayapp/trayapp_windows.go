@@ -480,9 +480,16 @@ var (
 
 const swRestore = 9
 
-// setWindowIcon sets the small and large title-bar icons on hwnd by loading
-// resource ID 1 (the .ico embedded via winres at build time).
-func setWindowIcon(hwnd uintptr) {
+// Icons are loaded once and reused: WM_SETICON does not take ownership, so the
+// handles must stay alive for as long as any window uses them.
+var (
+	iconOnce         sync.Once
+	hIconBig, hIconS uintptr
+)
+
+// loadAppIcons writes the embedded .ico to a temp file and loads the large and
+// small icon handles from it.
+func loadAppIcons() {
 	tmp, err := os.CreateTemp("", "*.ico")
 	if err != nil {
 		return
@@ -502,17 +509,24 @@ func setWindowIcon(hwnd uintptr) {
 	const (
 		imageIcon      = 1
 		lrLoadFromFile = 0x10
-		wmSetIcon      = 0x0080
-		iconSmall      = 0
-		iconBig        = 1
 	)
-	hLarge, _, _ := procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 32, 32, lrLoadFromFile)
-	hSmall, _, _ := procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 16, 16, lrLoadFromFile)
-	if hLarge != 0 {
-		procSendMessage.Call(hwnd, wmSetIcon, iconBig, hLarge)
+	hIconBig, _, _ = procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 32, 32, lrLoadFromFile)
+	hIconS, _, _ = procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 16, 16, lrLoadFromFile)
+}
+
+// setWindowIcon sets the title-bar and Alt-Tab icons on hwnd.
+func setWindowIcon(hwnd uintptr) {
+	iconOnce.Do(loadAppIcons)
+	const (
+		wmSetIcon = 0x0080
+		iconSmall = 0
+		iconBig   = 1
+	)
+	if hIconBig != 0 {
+		procSendMessage.Call(hwnd, wmSetIcon, iconBig, hIconBig)
 	}
-	if hSmall != 0 {
-		procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hSmall)
+	if hIconS != 0 {
+		procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hIconS)
 	}
 }
 
