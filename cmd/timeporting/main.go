@@ -157,6 +157,9 @@ func runMain() {
 	}
 
 	// ── Build day plans (also used by the /api/reload endpoint) ──────────────
+	// webSrv is declared here so buildPlans can call WithCredentialError.
+	var webSrv *web.Server
+
 	buildPlans := func(c config.Config, progress web.ProgressFunc) ([]model.DayPlan, *jira.Client, *jira.Client, error) {
 		report := func(done, total int, phase string) {
 			if progress != nil {
@@ -191,6 +194,8 @@ func runMain() {
 					}
 					existing[dk] = append(existing[dk], wls...)
 				}
+			} else if webSrv != nil {
+				webSrv.WithCredentialError(err.Error())
 			}
 		}
 		// Always also read from mock so submitted-to-mock worklogs are visible.
@@ -265,6 +270,7 @@ func runMain() {
 		}
 	}
 	stubExisting := map[string][]model.Worklog{}
+	var startupCredErr string
 	if stubRC != mockClient {
 		if ex, err := stubRC.ExistingWorklogsByDay(cfg.Jira.Email, startDate, endDate); err == nil {
 			for dk, wls := range ex {
@@ -273,6 +279,8 @@ func runMain() {
 				}
 				stubExisting[dk] = append(stubExisting[dk], wls...)
 			}
+		} else {
+			startupCredErr = err.Error()
 		}
 	}
 	if ex, err := mockClient.ExistingWorklogsByDay("", startDate, endDate); err == nil {
@@ -381,12 +389,15 @@ func runMain() {
 	}
 
 	// ── Web review UI ──────────────────────────────────────────────────────
-	webSrv := web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
+	webSrv = web.New(plans, mockClient, realClient, cfg.Target, cfg.WebPort).
 		WithConfig(cfg, *cfgPath).
 		WithVersion(version).
 		WithPlanBuilder(web.PlanBuilder(buildPlans)).
 		WithDayBuilder(web.DayBuilder(buildDay)).
 		WithPendingDays(pendingDates)
+	if startupCredErr != "" {
+		webSrv.WithCredentialError(startupCredErr)
+	}
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
 

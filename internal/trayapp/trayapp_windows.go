@@ -136,6 +136,15 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 	}
 	// The server must be running to count incomplete days.
 	ensureServerRunning(cfg)
+
+	// Check for a credential error first; warn even when count is zero.
+	if credErr := fetchCredentialError(cfg); credErr != "" {
+		showReminderToast("⚠️ Jira credentials error", credErr+" — open Settings to fix it.", fmt.Sprintf("http://localhost:%d/settings", cfg.WebPort))
+		s.LastRemindedDate = today
+		saveState(s)
+		return
+	}
+
 	count := countIncompleteDays(cfg)
 	if count <= 0 {
 		return
@@ -187,6 +196,23 @@ func watchForFirstInteraction(onReturn func()) {
 			go onReturn()
 		}
 	}
+}
+
+// fetchCredentialError queries /api/status and returns the credError field, or
+// empty string when the server is unreachable or credentials are fine.
+func fetchCredentialError(cfg config.Config) string {
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/status", cfg.WebPort))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var st struct {
+		CredError string `json:"credError"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return ""
+	}
+	return st.CredError
 }
 
 // countIncompleteDays asks the running web server how many days are under 7h.

@@ -90,6 +90,7 @@ type Server struct {
 	dayBuilder  DayBuilder      // called to build a single day on demand
 	pendingDays map[string]bool // days with stub data only; full plan built on first navigation
 	appVersion  string          // set via WithVersion; shown in Settings footer
+	credError   string          // non-empty when the last Jira auth attempt returned 401/403
 }
 
 // New creates a Server.
@@ -132,6 +133,14 @@ func (s *Server) WithPlanBuilder(fn PlanBuilder) *Server {
 
 // WithVersion stores the running app version for display in the UI.
 func (s *Server) WithVersion(v string) *Server { s.appVersion = v; return s }
+
+// WithCredentialError records a Jira auth failure message to surface in the UI.
+func (s *Server) WithCredentialError(msg string) *Server {
+	s.mu.Lock()
+	s.credError = msg
+	s.mu.Unlock()
+	return s
+}
 
 // WithDayBuilder attaches the on-demand single-day builder.
 func (s *Server) WithDayBuilder(fn DayBuilder) *Server {
@@ -453,6 +462,7 @@ func (s *Server) applyPlans(plans []model.DayPlan, mockClient, realClient *jira.
 	s.days = newDays
 	s.dayIndex = newIndex
 	s.pendingDays = map[string]bool{} // full rebuild clears all stubs
+	s.credError = ""                  // successful rebuild means credentials work
 	if mockClient != nil {
 		s.mockClient = mockClient
 	}
@@ -861,6 +871,7 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"write":         write,
 		"activeWrite":   s.activeWrite,
 		"realAvailable": s.jiraClient != nil,
+		"credError":     s.credError,
 	})
 }
 
@@ -2551,6 +2562,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
 .badge-submitted{background:#00875a;color:#fff;padding:2px 8px;border-radius:12px;font-size:.75rem}
 .badge-target{background:#ff991f;color:#172b4d;padding:2px 8px;border-radius:12px;font-size:.75rem}
 #toast{position:fixed;bottom:20px;right:20px;background:#172b4d;color:#fff;padding:10px 18px;border-radius:6px;display:none;font-size:.85rem;z-index:999}
+#cred-banner{display:none;background:#FF5630;color:#fff;padding:8px 20px;font-size:.85rem;align-items:center;gap:10px}
 #day-overlay{position:fixed;inset:0;background:rgba(255,255,255,.88);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:600}
 .spinner{width:52px;height:52px;border:5px solid #dfe1e6;border-top-color:#0052cc;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -2568,6 +2580,10 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
     <a href="/settings" style="color:#fff;font-size:.8rem;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
   </span>
 </header>
+<div id="cred-banner">
+  ⚠️ Jira credentials error: <span id="cred-banner-msg"></span>
+  &nbsp;<a href="/settings" style="color:#fff;font-weight:700;margin-left:auto">Fix in Settings →</a>
+</div>
 <main>
   <div id="incomplete-panel">
     <div id="incomplete-panel-header">⚠ Incomplete days</div>
@@ -3294,6 +3310,13 @@ async function buildIncompleteDaysInBackground() {
 }
 
 async function init() {
+  try {
+    const st = await api('GET','/status');
+    if (st.credError) {
+      document.getElementById('cred-banner-msg').textContent = st.credError;
+      document.getElementById('cred-banner').style.display = 'flex';
+    }
+  } catch(_) {}
   try {
     days = await api('GET','/days');
     renderList();
