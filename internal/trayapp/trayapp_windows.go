@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"text/template"
 	"time"
 	"unsafe"
 
@@ -50,7 +51,27 @@ type state struct {
 
 // Run starts the tray icon and blocks until the user quits.
 func Run(version, cfgPath string) {
+	if !claimSingleInstance() {
+		log.Printf("another Timereporting Assistant tray is already running — exiting")
+		return
+	}
 	systray.Run(func() { onReady(version, cfgPath) }, nil)
+}
+
+// claimSingleInstance reports whether this is the only tray process in the
+// current session. The mutex handle is deliberately never closed: it must live
+// for the whole process, and Windows releases it automatically on exit.
+func claimSingleInstance() bool {
+	name, err := syscall.UTF16PtrFromString(`Local\TimereportingAssistantTray`)
+	if err != nil {
+		return true
+	}
+	h, _, lastErr := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
+	if h == 0 {
+		return true
+	}
+	const errorAlreadyExists = syscall.Errno(183)
+	return lastErr != error(errorAlreadyExists)
 }
 
 func onReady(version, cfgPath string) {
@@ -108,8 +129,9 @@ func onReady(version, cfgPath string) {
 	for {
 		select {
 		case <-mOpenReport.ClickedCh:
-			ensureServerRunning(cfg)
-			openAppWindow("Timereporting Assistant", webURL)
+			// Starting the server can take tens of seconds; the window opens
+			// immediately with a spinner and waits for it there.
+			openAppWindow("Timereporting Assistant", webURL, func() error { return ensureServerRunning(cfg) })
 		case <-mOpenLogs.ClickedCh:
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
@@ -135,7 +157,10 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 		return
 	}
 	// The server must be running to count incomplete days.
-	ensureServerRunning(cfg)
+	if err := ensureServerRunning(cfg); err != nil {
+		log.Printf("checkAndRemind: %v", err)
+		return
+	}
 
 	// Check for a credential error first; warn even when count is zero.
 	if credErr := fetchCredentialError(cfg); credErr != "" {
@@ -256,44 +281,60 @@ func countIncompleteDays(cfg config.Config) int {
 	return count
 }
 
+// serverStartMu serialises server startup so two concurrent callers (tray
+// click and reminder check) cannot each spawn a timeporting.exe.
+var serverStartMu sync.Mutex
+
 // ensureServerRunning starts timeporting if the review UI isn't already up.
-// It blocks (up to ~30s) until the web port is accepting connections so the
+// It blocks (up to ~60s) until the web port is accepting connections so the
 // caller can open the browser without hitting a not-yet-listening port.
-func ensureServerRunning(cfg config.Config) {
+func ensureServerRunning(cfg config.Config) error {
+	serverStartMu.Lock()
+	defer serverStartMu.Unlock()
+
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.WebPort)
 	if portOpen(addr) {
-		return
+		return nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		log.Printf("ensureServerRunning: os.Executable: %v", err)
-		return
+		return fmt.Errorf("cannot locate the installation folder: %w", err)
 	}
-	name := "timeporting.exe"
-	path := filepath.Join(filepath.Dir(exe), name)
+	path := filepath.Join(filepath.Dir(exe), "timeporting.exe")
 	if _, err := os.Stat(path); err != nil {
-		log.Printf("ensureServerRunning: %s not found: %v", path, err)
-		return
+		return fmt.Errorf("timeporting.exe was not found next to the tray app (%s) — try reinstalling", path)
 	}
 	cmd := exec.Command(path, "--no-browser")
 	// CREATE_NO_WINDOW prevents any console window from appearing.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := cmd.Start(); err != nil {
-		log.Printf("ensureServerRunning: start %s: %v", path, err)
-		return
+		return fmt.Errorf("could not start %s: %w", path, err)
 	}
 	log.Printf("ensureServerRunning: started %s (pid %d), waiting for %s", path, cmd.Process.Pid, addr)
 
+	// The process exiting early is reported by the waiter below, so its result
+	// is collected here rather than left as a zombie.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
 	// Wait for the server to finish building plans and start listening.
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if portOpen(addr) {
 			log.Printf("ensureServerRunning: %s is up", addr)
-			return
+			return nil
 		}
-		time.Sleep(300 * time.Millisecond)
+		select {
+		case err := <-exited:
+			if portOpen(addr) {
+				return nil
+			}
+			log.Printf("ensureServerRunning: %s exited early: %v", path, err)
+			return fmt.Errorf("the background service stopped during startup (%v) — see the logs for details", err)
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
-	log.Printf("ensureServerRunning: timed out waiting for %s", addr)
+	return fmt.Errorf("the background service did not start listening on %s within 60s — see the logs for details", addr)
 }
 
 // portOpen reports whether a TCP connection to addr succeeds quickly.
@@ -459,13 +500,14 @@ func setIcon() {
 	systray.SetIcon(appIconPNG)
 }
 
-// openAppWindow opens a native WebView2 window showing the given URL.
-// If WebView2 runtime is not available it falls back to the system browser.
-// Only one window exists at a time; clicking the tray item while the window
-// is already open restores and focuses it instead of opening a second one.
+// Only one app window exists at a time; clicking the tray item while the
+// window is already open restores and focuses it instead of opening a second.
 var (
 	webviewMu   sync.Mutex
 	webviewHWND uintptr // 0 when no window is open
+	// WebView2 takes seconds to initialise, during which webviewHWND is still
+	// 0; without this flag a second tray click opens a second window.
+	webviewOpening bool
 )
 
 var (
@@ -477,6 +519,9 @@ var (
 	procLoadImage        = user32.NewProc("LoadImageW")
 	procSendMessage      = user32.NewProc("SendMessageW")
 	procSetClassLongPtr  = user32.NewProc("SetClassLongPtrW")
+
+	kernel32        = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutex = kernel32.NewProc("CreateMutexW")
 )
 
 const swRestore = 9
@@ -543,31 +588,73 @@ func bringWindowToFront(hwnd uintptr) {
 	procBringWindowToTop.Call(hwnd)
 }
 
-func openAppWindow(title, url string) {
-	webviewMu.Lock()
-	hwnd := webviewHWND
-	webviewMu.Unlock()
+// splashHTML is shown while `wait` runs so the window is never a blank frame.
+const splashHTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0}
+body{display:flex;align-items:center;justify-content:center;
+ font:14px/1.5 "Segoe UI",system-ui,sans-serif;color:#334155;background:#f8fafc}
+.box{text-align:center;max-width:420px;padding:24px}
+.spin{width:38px;height:38px;margin:0 auto 18px;border:4px solid #dbe3ec;
+ border-top-color:#2563eb;border-radius:50%;animation:r .9s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+h1{font-size:16px;font-weight:600;margin:0 0 6px;color:#0f172a}
+p{margin:0;color:#64748b}
+</style></head><body><div class="box"><div class="spin"></div>
+<h1>Starting Timereporting Assistant…</h1>
+<p>Collecting git activity, calendar events and Jira issues. This can take up to a minute on first launch.</p>
+</div></body></html>`
 
-	// If a window already exists, bring it to the front.
-	if hwnd != 0 {
-		alive, _, _ := procIsWindow.Call(hwnd)
-		if alive != 0 {
+// errorHTML renders a startup failure inside the window instead of leaving the
+// user with an unresponsive blank frame.
+func errorHTML(msg string) string {
+	return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0}
+body{display:flex;align-items:center;justify-content:center;
+ font:14px/1.5 "Segoe UI",system-ui,sans-serif;color:#334155;background:#f8fafc}
+.box{max-width:520px;padding:24px}
+h1{font-size:16px;font-weight:600;margin:0 0 10px;color:#b91c1c}
+p{margin:0 0 10px;color:#475569}
+code{display:block;background:#fff;border:1px solid #e2e8f0;border-radius:6px;
+ padding:10px;white-space:pre-wrap;word-break:break-word;color:#0f172a}
+</style></head><body><div class="box">
+<h1>Couldn't start Timereporting Assistant</h1>
+<code>` + template.HTMLEscapeString(msg) + `</code>
+<p>Close this window and try “Open time report” again. Use “Open logs folder” in the tray menu for details.</p>
+</div></body></html>`
+}
+
+// openAppWindow shows the app window, displaying a spinner until wait returns.
+// wait runs off the UI thread; if it fails the error is rendered in the window.
+func openAppWindow(title, url string, wait func() error) {
+	webviewMu.Lock()
+	// A window is already being created — the click is a no-op.
+	if webviewOpening {
+		webviewMu.Unlock()
+		return
+	}
+	if hwnd := webviewHWND; hwnd != 0 {
+		if alive, _, _ := procIsWindow.Call(hwnd); alive != 0 {
+			webviewMu.Unlock()
 			bringWindowToFront(hwnd)
 			return
 		}
-		// Window handle is stale — reset and open a new one.
-		webviewMu.Lock()
-		webviewHWND = 0
-		webviewMu.Unlock()
 	}
+	// No window, or the handle is stale — open a fresh one.
+	webviewHWND = 0
+	webviewOpening = true
+	webviewMu.Unlock()
 
 	go func() {
 		// The window and its message loop must live on the same OS thread.
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("app window panicked: %v", rec)
+			}
 			webviewMu.Lock()
 			webviewHWND = 0
+			webviewOpening = false
 			webviewMu.Unlock()
 		}()
 
@@ -575,6 +662,11 @@ func openAppWindow(title, url string) {
 		if w == nil {
 			// WebView2 runtime not available — fall back to system browser.
 			log.Printf("WebView2 not available, opening system browser")
+			if err := wait(); err != nil {
+				log.Printf("startup failed: %v", err)
+				showToast("Timereporting Assistant", err.Error(), "")
+				return
+			}
 			openBrowser(url)
 			return
 		}
@@ -588,7 +680,28 @@ func openAppWindow(title, url string) {
 		setWindowIcon(webviewHWND)
 		webviewMu.Unlock()
 
-		w.Navigate(url)
+		w.SetHtml(splashHTML)
+
+		go func() {
+			var err error
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						err = fmt.Errorf("unexpected error during startup: %v", rec)
+					}
+				}()
+				err = wait()
+			}()
+			w.Dispatch(func() {
+				if err != nil {
+					log.Printf("startup failed: %v", err)
+					w.SetHtml(errorHTML(err.Error()))
+					return
+				}
+				w.Navigate(url)
+			})
+		}()
+
 		w.Run()
 	}()
 }

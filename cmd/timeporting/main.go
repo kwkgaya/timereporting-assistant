@@ -101,6 +101,17 @@ func runMain() {
 		log.Fatalf("config validation: %v", err)
 	}
 
+	// ── Claim the web port up front ────────────────────────────────────────
+	// Binding before the (slow) plan build makes this the single-instance
+	// guard: a second copy exits in milliseconds instead of duplicating all
+	// the work and only then failing to listen.
+	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("port %d is already in use — Timereporting Assistant is probably already running: %v", cfg.WebPort, err)
+	}
+	defer ln.Close()
+
 	// ── Credential setup if needed ─────────────────────────────────────────
 	if cfg.NeedsJiraRead() {
 		if err := setup.EnsureCredentials(&cfg, true); err != nil {
@@ -407,9 +418,7 @@ func runMain() {
 		m, err := loadMeetings(cfg)
 		webSrv.WithCalendarWarning(calendarWarning(cfg, m, err))
 	}()
-	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	fmt.Printf("\n✅ Review UI ready → http://%s\n", addr)
-
 	// Open the review UI in the browser shortly after the server starts.
 	// Skipped when --no-browser is set (tray app opens it instead).
 	if !*noBrowser {
@@ -419,7 +428,7 @@ func runMain() {
 		}()
 	}
 
-	if err := http.ListenAndServe(addr, webSrv.Handler()); err != nil {
+	if err := http.Serve(ln, webSrv.Handler()); err != nil {
 		log.Fatal(err)
 	}
 }

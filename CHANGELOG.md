@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.32.0-beta.3] — 2026-08-03
+### Added
+- "Open time report" now opens the window immediately with a spinner explaining that git activity, calendar events and Jira issues are being collected, instead of leaving a blank unresponsive frame during the wait
+- Startup failures (missing `timeporting.exe`, the service exiting early, or the port never opening) are reported in the window with a message and a pointer to the logs, rather than hanging
+
+### Fixed
+- Two application windows could be opened. WebView2 takes seconds to initialise, and the window handle was only recorded afterwards, so a second tray click during that gap started a second window
+- Two background services could be started at once when a tray click and the daily reminder check raced
+- A duplicate `timeporting.exe` now exits immediately instead of repeating the whole (slow) plan build and only then failing to listen — the web port is claimed before the build starts
+- A second tray process now exits at startup instead of adding a second tray icon
+- Removed `calendar.ics`, a personal calendar export that was committed by mistake and read by nothing; `*.ics` is now ignored
+
 ## [0.32.0-beta.2] — 2026-08-03
 ### Fixed
 - Issue picker could not find an issue by its key (e.g. `EDB-11549`). JQL's `text ~` clause only searches summary/description/comments and never matches a key, and the unescaped `-` made the whole query fail. Keys are now resolved with a direct issue lookup, the free-text search also covers `summary`, and a key hit survives a failed text search
