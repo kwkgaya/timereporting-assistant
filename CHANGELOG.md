@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 ### Added
-- Cancelled meetings are excluded from the day's time. A calendar entry whose title is a cancellation notice (`Cancelled - …`, `Canceled: …`) or that carries `STATUS:CANCELLED` no longer contributes suggested time. Titles that merely start with the word, such as "Cancelled flights follow-up", are kept — a separator is required
+- Cancelled meetings are excluded from the day's time. A calendar entry whose title is a cancellation notice (`Cancelled - …`, `Canceled: …`) or that carries `STATUS:CANCELLED` no longer contributes suggested time. Titles that merely start with the word, such as "Cancelled flights follow-up", are kept — a separator is required. Cancelling a single occurrence of a recurring meeting removes only that day, not the series
 - The day summary line now reports a **Balance** — the time still missing from (or logged over) the 7h target. Balance replaces **Total**, so exactly one of the two is shown: Total only when the day lands exactly on target, Balance otherwise
 
 ### Changed

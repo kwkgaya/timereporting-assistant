@@ -85,7 +85,11 @@ func Parse(r io.Reader) ([]model.Meeting, error) {
 			cur = vevent{}
 			inEvent = true
 		case name == "END" && value == "VEVENT" && inEvent:
-			if !cur.declined && !cur.cancelled && !cur.start.IsZero() && !cur.end.IsZero() && cur.end.After(cur.start) {
+			hasTimes := !cur.start.IsZero() && !cur.end.IsZero() && cur.end.After(cur.start)
+			// A cancelled occurrence of a series is kept so it can suppress the
+			// occurrence the rule would otherwise generate; expandEvents never
+			// emits it as a meeting.
+			if !cur.declined && ((hasTimes && !cur.cancelled) || (cur.cancelled && cur.hasRecurID)) {
 				events = append(events, cur)
 			}
 			inEvent = false
@@ -150,6 +154,9 @@ func expandEvents(events []vevent, now time.Time) []model.Meeting {
 		})
 	}
 	for _, e := range events {
+		if e.cancelled {
+			continue
+		}
 		r, ok := parseRRule(e.rruleRaw)
 		if e.rruleRaw == "" || e.hasRecurID || !ok {
 			add(e, e.start, e.end)

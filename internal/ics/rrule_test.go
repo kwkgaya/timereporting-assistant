@@ -126,6 +126,34 @@ func TestRecurrenceIDOverridesGeneratedOccurrence(t *testing.T) {
 	}
 }
 
+func TestCancelledOccurrenceRemovesOnlyThatDay(t *testing.T) {
+	ics := buildICS(
+		event(
+			"UID:series-2",
+			"SUMMARY:Daily sync",
+			"DTSTART:20260601T090000Z",
+			"DTEND:20260601T093000Z",
+			"RRULE:FREQ=DAILY;COUNT=3",
+		),
+		event(
+			"UID:series-2",
+			"RECURRENCE-ID:20260602T090000Z",
+			"SUMMARY:Cancelled - Daily sync",
+			"DTSTART:20260602T090000Z",
+			"DTEND:20260602T093000Z",
+		),
+	)
+	got := daysWithMeetings(t, ics)
+	if got["2026-06-02"] != 0 {
+		t.Errorf("cancelled occurrence still present on 2026-06-02: %v", got)
+	}
+	for _, d := range []string{"2026-06-01", "2026-06-03"} {
+		if got[d] != 1 {
+			t.Errorf("expected the series to survive on %s, got %v", d, got)
+		}
+	}
+}
+
 func TestNonRecurringEventStillParsed(t *testing.T) {
 	got := daysWithMeetings(t, buildICS(event(
 		"UID:one-off",
