@@ -44,6 +44,7 @@ type UnassignedView struct {
 	Source string `json:"source"`
 	Text   string `json:"text"`
 	Ref    string `json:"ref"`
+	Branch string `json:"branch,omitempty"`
 	Hash   string `json:"hash,omitempty"`
 }
 
@@ -1399,7 +1400,7 @@ func planToView(p model.DayPlan) DayView {
 	toUnassigned := func(acts []model.Activity) []UnassignedView {
 		out := make([]UnassignedView, 0, len(acts))
 		for _, a := range acts {
-			out = append(out, UnassignedView{Source: a.Source, Text: a.Text, Ref: a.Ref, Hash: a.Hash})
+			out = append(out, UnassignedView{Source: a.Source, Text: a.Text, Ref: a.Ref, Branch: a.Branch, Hash: a.Hash})
 		}
 		return out
 	}
@@ -2899,11 +2900,12 @@ function renderDetail(day) {
     html += '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.85rem;color:#ff991f;font-weight:600">⚠️ '+day.unassigned.length+' activity item(s) with no Jira key — assign or use Rovo</summary>';
     html += '<div style="background:#fffae6;border:1px solid #ffe380;border-radius:4px;padding:10px 14px;margin-top:6px">';
     html += '<table style="font-size:.82rem;width:100%;border-collapse:collapse;margin-bottom:8px">'
-      +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Commit</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
+      +'<tr><th style="text-align:left;padding:3px 8px">Source</th><th style="text-align:left;padding:3px 8px">Commit</th><th style="text-align:left;padding:3px 8px">Branch</th><th style="text-align:left;padding:3px 8px">Description</th></tr>';
     day.unassigned.forEach(a => {
       html += '<tr>'
         +'<td style="padding:3px 8px;color:#6b778c;white-space:nowrap">'+esc(a.source)+'</td>'
-        +'<td style="padding:3px 8px;font-family:monospace;color:#0052cc;white-space:nowrap">'+(a.hash||'')+'</td>'
+        +'<td style="padding:3px 8px;font-family:monospace;color:#0052cc;white-space:nowrap">'+esc(a.hash||'')+'</td>'
+        +'<td style="padding:3px 8px;font-family:monospace;color:#42526e;white-space:nowrap">'+esc(a.branch||'—')+'</td>'
         +'<td style="padding:3px 8px">'+esc(a.text)+'</td>'
         +'</tr>';
     });

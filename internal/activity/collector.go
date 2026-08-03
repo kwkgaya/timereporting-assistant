@@ -300,8 +300,10 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 			}
 		}
 		ref := ""
+		branch := ""
 		if len(parts) >= 4 && parts[3] != "" {
-			ref = parts[3] + commitTime
+			branch = parts[3]
+			ref = branch + commitTime
 		} else {
 			ref = strings.TrimSpace(commitTime)
 		}
@@ -310,6 +312,7 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 			Source: SourceLocalGit,
 			Text:   subject,
 			Ref:    strings.TrimSpace(ref),
+			Branch: branch,
 			Hash:   fullHash[:min(7, len(fullHash))],
 		})
 	}
@@ -321,12 +324,13 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 // author date falls in [after, before] and matching the configured authors.
 func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash map[string]bool) ([]model.Activity, error) {
 	// git log -g: walks the reflog instead of commit ancestry.
-	// --format="%H %ae %aI %s" gives full-hash, author-email, ISO date, subject.
+	// %D gives any ref decorations pointing at the commit (often empty for
+	// orphaned work, in which case the branch is resolved separately below).
 	args := []string{
 		"-C", repoPath,
 		"log", "-g",
 		"--no-merges",
-		"--format=%H%x1F%ae%x1F%aI%x1F%s",
+		"--format=%H%x1F%ae%x1F%aI%x1F%s%x1F%D",
 		"--after=" + after,
 		"--before=" + before,
 	}
@@ -348,7 +352,7 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\x1f", 4)
+		parts := strings.SplitN(line, "\x1f", 5)
 		if len(parts) < 4 {
 			continue
 		}
@@ -363,26 +367,79 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		seenHash[fullHash] = true // mark so the same hash from another reflog entry is not re-added
 
 		subject := parts[3]
+		decorations := ""
+		if len(parts) == 5 {
+			decorations = parts[4]
+		}
+		branch := branchFromDecorations(decorations)
+		if branch == "" {
+			branch = g.branchContaining(repoPath, fullHash)
+		}
 		// Use the author date/time instead of the hash.
 		commitTime := ""
 		if t, err := time.Parse(time.RFC3339, parts[2]); err == nil {
 			commitTime = t.Format("15:04")
 		}
-		ref := ""
-		if commitTime != "" {
-			ref = commitTime + " (reflog)"
+		ref := commitTime
+		if branch != "" {
+			if ref != "" {
+				ref += " "
+			}
+			ref += branch
 		} else {
-			ref = "(reflog)"
+			if ref != "" {
+				ref += " "
+			}
+			ref += "(reflog)"
 		}
 		acts = append(acts, model.Activity{
 			Date:   day,
 			Source: SourceLocalGitReflog,
 			Text:   subject,
 			Ref:    ref,
+			Branch: branch,
 			Hash:   fullHash[:min(7, len(fullHash))],
 		})
 	}
 	return acts, nil
+}
+
+// branchFromDecorations extracts a branch name from git's %D output, e.g.
+// "HEAD -> feature/x, origin/feature/x" or "tag: v1, main". Tags are skipped.
+func branchFromDecorations(d string) string {
+	for _, part := range strings.Split(d, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" || strings.HasPrefix(p, "tag: ") {
+			continue
+		}
+		if i := strings.Index(p, "-> "); i >= 0 {
+			p = strings.TrimSpace(p[i+3:])
+		}
+		if p == "HEAD" || p == "" {
+			continue
+		}
+		return p
+	}
+	return ""
+}
+
+// branchContaining returns the first branch that contains the given commit, or
+// "" when the commit is not reachable from any branch (orphaned/rebased away).
+func (g *GitCollector) branchContaining(repoPath, hash string) string {
+	cmd := exec.Command(g.gitBin, "-C", repoPath, "branch", "--all",
+		"--contains", hash, "--format=%(refname:short)")
+	hideCmd(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		b := strings.TrimSpace(line)
+		if b != "" && b != "HEAD" {
+			return b
+		}
+	}
+	return ""
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

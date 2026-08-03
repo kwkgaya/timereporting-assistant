@@ -476,6 +476,7 @@ var (
 	procBringWindowToTop = user32.NewProc("BringWindowToTop")
 	procLoadImage        = user32.NewProc("LoadImageW")
 	procSendMessage      = user32.NewProc("SendMessageW")
+	procSetClassLongPtr  = user32.NewProc("SetClassLongPtrW")
 )
 
 const swRestore = 9
@@ -518,15 +519,21 @@ func loadAppIcons() {
 func setWindowIcon(hwnd uintptr) {
 	iconOnce.Do(loadAppIcons)
 	const (
-		wmSetIcon = 0x0080
-		iconSmall = 0
-		iconBig   = 1
+		wmSetIcon   = 0x0080
+		iconSmall   = 0
+		iconBig     = 1
+		gclpHIcon   = ^uintptr(13) // -14
+		gclpHIconSm = ^uintptr(33) // -34
 	)
+	// go-webview2 registers its window class with IDI_APPLICATION; the taskbar
+	// falls back to that class icon, so it must be replaced too.
 	if hIconBig != 0 {
 		procSendMessage.Call(hwnd, wmSetIcon, iconBig, hIconBig)
+		procSetClassLongPtr.Call(hwnd, gclpHIcon, hIconBig)
 	}
 	if hIconS != 0 {
 		procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hIconS)
+		procSetClassLongPtr.Call(hwnd, gclpHIconSm, hIconS)
 	}
 }
 
@@ -555,6 +562,9 @@ func openAppWindow(title, url string) {
 	}
 
 	go func() {
+		// The window and its message loop must live on the same OS thread.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		defer func() {
 			webviewMu.Lock()
 			webviewHWND = 0
