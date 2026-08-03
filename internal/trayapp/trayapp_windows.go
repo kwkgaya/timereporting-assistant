@@ -52,7 +52,7 @@ type state struct {
 // Run starts the tray icon and blocks until the user quits.
 func Run(version, cfgPath string) {
 	if !claimSingleInstance() {
-		log.Printf("another Timereporting Assistant tray is already running — exiting")
+		log.Printf("another Time Reporting Assistant tray is already running — exiting")
 		return
 	}
 	systray.Run(func() { onReady(version, cfgPath) }, nil)
@@ -75,8 +75,8 @@ func claimSingleInstance() bool {
 }
 
 func onReady(version, cfgPath string) {
-	systray.SetTitle("Timereporting")
-	systray.SetTooltip("Timereporting Assistant " + version)
+	systray.SetTitle("Time Reporting")
+	systray.SetTooltip("Time Reporting Assistant " + version)
 	setIcon()
 
 	cfg, _ := config.Load(cfgPath)
@@ -107,7 +107,7 @@ func onReady(version, cfgPath string) {
 	mVersion := systray.AddMenuItem("Version: "+version, "")
 	mVersion.Disable()
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit", "Exit Timereporting Assistant tray")
+	mQuit := systray.AddMenuItem("Quit", "Exit Time Reporting Assistant tray")
 
 	// Show the reminder on the first time the user interacts with the computer
 	// each day (i.e. returns from lock screen, sleep, or any idle ≥ 5 min).
@@ -131,7 +131,7 @@ func onReady(version, cfgPath string) {
 		case <-mOpenReport.ClickedCh:
 			// Starting the server can take tens of seconds; the window opens
 			// immediately with a spinner and waits for it there.
-			openAppWindow("Timereporting Assistant", webURL, func() error { return ensureServerRunning(cfg) })
+			openAppWindow("Time Reporting Assistant", webURL, func() error { return ensureServerRunning(cfg) })
 		case <-mOpenLogs.ClickedCh:
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
@@ -452,7 +452,7 @@ $template = @"
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Timereporting Assistant").Show($toast)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Time Reporting Assistant").Show($toast)
 `, url, title, message, url)
 
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
@@ -486,7 +486,7 @@ $template = @"
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Timereporting Assistant").Show($toast)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Time Reporting Assistant").Show($toast)
 `, url, title, message)
 
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
@@ -600,7 +600,7 @@ body{display:flex;align-items:center;justify-content:center;
 h1{font-size:16px;font-weight:600;margin:0 0 6px;color:#0f172a}
 p{margin:0;color:#64748b}
 </style></head><body><div class="box"><div class="spin"></div>
-<h1>Starting Timereporting Assistant…</h1>
+<h1>Starting Time Reporting Assistant…</h1>
 <p>Collecting git activity, calendar events and Jira issues. This can take up to a minute on first launch.</p>
 </div></body></html>`
 
@@ -617,7 +617,7 @@ p{margin:0 0 10px;color:#475569}
 code{display:block;background:#fff;border:1px solid #e2e8f0;border-radius:6px;
  padding:10px;white-space:pre-wrap;word-break:break-word;color:#0f172a}
 </style></head><body><div class="box">
-<h1>Couldn't start Timereporting Assistant</h1>
+<h1>Couldn't start Time Reporting Assistant</h1>
 <code>` + template.HTMLEscapeString(msg) + `</code>
 <p>Close this window and try “Open time report” again. Use “Open logs folder” in the tray menu for details.</p>
 </div></body></html>`
@@ -664,7 +664,7 @@ func openAppWindow(title, url string, wait func() error) {
 			log.Printf("WebView2 not available, opening system browser")
 			if err := wait(); err != nil {
 				log.Printf("startup failed: %v", err)
-				showToast("Timereporting Assistant", err.Error(), "")
+				showToast("Time Reporting Assistant", err.Error(), "")
 				return
 			}
 			openBrowser(url)
@@ -752,7 +752,7 @@ func checkForUpdates(cfg config.Config, version string, manual bool) {
 	if rel == nil {
 		log.Printf("no update available (current %s)", version)
 		if manual {
-			showToast("Timereporting", "You're on the latest version ("+version+").", "")
+			showToast("Time Reporting", "You're on the latest version ("+version+").", "")
 		}
 		return
 	}
@@ -780,7 +780,7 @@ func checkForUpdates(cfg config.Config, version string, manual bool) {
 		toastBody = rel.TagName + ": " + releaseNotes
 	}
 	if manual {
-		showToast("Updating Timereporting Assistant", toastBody, "")
+		showToast("Updating Time Reporting Assistant", toastBody, "")
 	}
 	dir := filepath.Join(os.TempDir(), "timereporting-update")
 	path, err := chk.Download(rel, dir)

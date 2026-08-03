@@ -108,7 +108,7 @@ func runMain() {
 	addr := fmt.Sprintf("localhost:%d", cfg.WebPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("port %d is already in use — Timereporting Assistant is probably already running: %v", cfg.WebPort, err)
+		log.Fatalf("port %d is already in use — Time Reporting Assistant is probably already running: %v", cfg.WebPort, err)
 	}
 	defer ln.Close()
 

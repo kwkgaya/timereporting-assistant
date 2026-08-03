@@ -1,4 +1,4 @@
-# Timereporting Assistant
+# Time Reporting Assistant
 
 A small Windows desktop tool that **automatically fills in your Jira time reports** from your calendar meetings and Git/GitHub activity, lets you review and edit each day, then submits the worklogs to Jira with one click.
 

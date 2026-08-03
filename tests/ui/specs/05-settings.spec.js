@@ -50,6 +50,6 @@ test.describe('Settings page', () => {
   });
 
   test('Settings footer shows app version', async ({ app }) => {
-    await expect(app.locator('footer')).toContainText('Timereporting Assistant');
+    await expect(app.locator('footer')).toContainText('Time Reporting Assistant');
   });
 });

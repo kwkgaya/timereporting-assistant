@@ -24,7 +24,7 @@ import (
 func RunConfigWizard(cfgPath string, existing config.Config) (config.Config, error) {
 	fmt.Println()
 	fmt.Println("┌─────────────────────────────────────────────────┐")
-	fmt.Println("│   Timereporting Assistant — First-run setup     │")
+	fmt.Println("│   Time Reporting Assistant — First-run setup    │")
 	fmt.Println("└─────────────────────────────────────────────────┘")
 	fmt.Println("Press Enter to accept a default shown in [brackets].")
 	fmt.Println()

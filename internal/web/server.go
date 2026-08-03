@@ -1617,7 +1617,7 @@ func buildJiraGuideHTML() string {
 	return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Create a Jira API token — Timereporting Assistant</title>
+<title>Create a Jira API token — Time Reporting Assistant</title>
 <style>` + guideCSS + `</style></head>
 <body>
 <header>
@@ -1628,7 +1628,7 @@ func buildJiraGuideHTML() string {
 <section>
   <h2>What is this and why do you need it?</h2>
   <p class="subtitle">
-    The Timereporting Assistant reads your existing Jira worklogs and — after you review and approve — writes new ones on your behalf.
+    The Time Reporting Assistant reads your existing Jira worklogs and — after you review and approve — writes new ones on your behalf.
     To do this securely it needs a <strong>scoped API token</strong>: a password-like key that only gives it permission to read and write worklogs, nothing else.
     The token is stored in your Windows Credential Manager and never written to any file.
   </p>
@@ -1710,7 +1710,7 @@ func buildJiraGuideHTML() string {
 const githubGuideHTML = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Create a GitHub token — Timereporting Assistant</title>
+<title>Create a GitHub token — Time Reporting Assistant</title>
 <style>` + guideCSS + `</style></head>
 <body>
 <header>
@@ -1797,7 +1797,7 @@ const githubGuideHTML = `<!doctype html>
 const wizardHTML = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Timereporting Assistant</title>
+<title>Setup — Time Reporting Assistant</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#172b4d;min-height:100vh;display:flex;flex-direction:column}
@@ -1837,7 +1837,7 @@ button{font:inherit;border-radius:4px;padding:9px 20px;cursor:pointer;font-size:
 a{color:#0052cc}
 </style></head>
 <body>
-<header><h1>Timereporting Assistant — Setup</h1></header>
+<header><h1>Time Reporting Assistant — Setup</h1></header>
 <div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
 <main>
 
@@ -2194,7 +2194,7 @@ func buildCalendarGuideHTML() string {
 	return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Get Outlook calendar URL — Timereporting Assistant</title>
+<title>Get Outlook calendar URL — Time Reporting Assistant</title>
 <style>` + guideCSS + `</style></head>
 <body>
 <header>
@@ -2269,7 +2269,7 @@ func buildSettingsHTML(appVersion string) string {
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Settings — Timereporting Assistant</title>
+<title>Settings — Time Reporting Assistant</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#172b4d}
@@ -2480,7 +2480,7 @@ button.secondary:hover{background:#f4f5f7}
 </section>
 
 </main>
-<footer style="text-align:center;padding:16px;font-size:.75rem;color:#97a0af">Timereporting Assistant ` + appVersion + ` &mdash; <a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md" target="_blank" style="color:#97a0af">Troubleshooting</a></footer>
+<footer style="text-align:center;padding:16px;font-size:.75rem;color:#97a0af">Time Reporting Assistant ` + appVersion + ` &mdash; <a href="https://github.com/kwkgaya/timereporting-assistant/blob/main/Troubleshooting.md" target="_blank" style="color:#97a0af">Troubleshooting</a></footer>
 
 <!-- Lightbox -->
 <div id="lightbox" onclick="closeLightbox()">
@@ -2638,7 +2638,7 @@ const indexHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Timereporting Assistant</title>
+<title>Time Reporting Assistant</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f5f7;color:#172b4d}
@@ -2728,7 +2728,7 @@ td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;paddin
   <div id="day-overlay-msg">Building day plan…</div>
 </div>
 <header>
-  <h1>Timereporting Assistant</h1>
+  <h1>Time Reporting Assistant</h1>
   <span style="margin-left:auto;display:flex;align-items:center;gap:10px">
     <a href="/settings" style="color:#fff;font-size:.8rem;border:1px solid rgba(255,255,255,.4);padding:3px 10px;border-radius:4px;text-decoration:none">⚙ Settings</a>
   </span>

@@ -1,9 +1,9 @@
-﻿# ─── Timereporting Assistant — Full cleanup before reinstall ───────────────
+﻿# ─── Time Reporting Assistant — Full cleanup before reinstall ──────────────
 # Removes: old config files, tray state, keychain credentials, autostart key.
 # Safe to run multiple times.
 
 Write-Host "
-=== Timereporting Assistant Cleanup ===" -ForegroundColor Cyan
+=== Time Reporting Assistant Cleanup ===" -ForegroundColor Cyan
 
 # 1. Config in AppData (v0.7.3+ default location)
 $appData = Join-Path $env:LOCALAPPDATA "timereporting-assistant"
