@@ -446,9 +446,33 @@ var (
 	procShowWindow       = user32.NewProc("ShowWindow")
 	procIsWindow         = user32.NewProc("IsWindow")
 	procBringWindowToTop = user32.NewProc("BringWindowToTop")
+	procLoadIcon         = user32.NewProc("LoadIconW")
+	procSendMessage      = user32.NewProc("SendMessageW")
+)
+
+var (
+	kernel32dll         = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandle = kernel32dll.NewProc("GetModuleHandleW")
 )
 
 const swRestore = 9
+
+// setWindowIcon sets the small and large title-bar icons on hwnd by loading
+// resource ID 1 (the .ico embedded via winres at build time).
+func setWindowIcon(hwnd uintptr) {
+	hInst, _, _ := procGetModuleHandle.Call(0)
+	hIcon, _, _ := procLoadIcon.Call(hInst, 1)
+	if hIcon == 0 {
+		return
+	}
+	const (
+		wmSetIcon = 0x0080
+		iconSmall = 0
+		iconBig   = 1
+	)
+	procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hIcon)
+	procSendMessage.Call(hwnd, wmSetIcon, iconBig, hIcon)
+}
 
 func bringWindowToFront(hwnd uintptr) {
 	procShowWindow.Call(hwnd, swRestore)
@@ -495,6 +519,7 @@ func openAppWindow(title, url string) {
 		// Store the HWND so we can focus the window on subsequent tray clicks.
 		webviewMu.Lock()
 		webviewHWND = uintptr(w.Window())
+		setWindowIcon(webviewHWND)
 		webviewMu.Unlock()
 
 		w.Navigate(url)
