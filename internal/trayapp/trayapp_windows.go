@@ -446,13 +446,8 @@ var (
 	procShowWindow       = user32.NewProc("ShowWindow")
 	procIsWindow         = user32.NewProc("IsWindow")
 	procBringWindowToTop = user32.NewProc("BringWindowToTop")
-	procLoadIcon         = user32.NewProc("LoadIconW")
+	procLoadImage        = user32.NewProc("LoadImageW")
 	procSendMessage      = user32.NewProc("SendMessageW")
-)
-
-var (
-	kernel32dll         = syscall.NewLazyDLL("kernel32.dll")
-	procGetModuleHandle = kernel32dll.NewProc("GetModuleHandleW")
 )
 
 const swRestore = 9
@@ -460,18 +455,37 @@ const swRestore = 9
 // setWindowIcon sets the small and large title-bar icons on hwnd by loading
 // resource ID 1 (the .ico embedded via winres at build time).
 func setWindowIcon(hwnd uintptr) {
-	hInst, _, _ := procGetModuleHandle.Call(0)
-	hIcon, _, _ := procLoadIcon.Call(hInst, 1)
-	if hIcon == 0 {
+	tmp, err := os.CreateTemp("", "*.ico")
+	if err != nil {
+		return
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(appIconPNG); err != nil {
+		tmp.Close()
+		return
+	}
+	tmp.Close()
+
+	path16, err := syscall.UTF16PtrFromString(tmpPath)
+	if err != nil {
 		return
 	}
 	const (
-		wmSetIcon = 0x0080
-		iconSmall = 0
-		iconBig   = 1
+		imageIcon      = 1
+		lrLoadFromFile = 0x10
+		wmSetIcon      = 0x0080
+		iconSmall      = 0
+		iconBig        = 1
 	)
-	procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hIcon)
-	procSendMessage.Call(hwnd, wmSetIcon, iconBig, hIcon)
+	hLarge, _, _ := procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 32, 32, lrLoadFromFile)
+	hSmall, _, _ := procLoadImage.Call(0, uintptr(unsafe.Pointer(path16)), imageIcon, 16, 16, lrLoadFromFile)
+	if hLarge != 0 {
+		procSendMessage.Call(hwnd, wmSetIcon, iconBig, hLarge)
+	}
+	if hSmall != 0 {
+		procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hSmall)
+	}
 }
 
 func bringWindowToFront(hwnd uintptr) {
