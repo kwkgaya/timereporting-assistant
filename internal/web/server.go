@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1521,7 +1522,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(indexHTML))
+	_, _ = w.Write([]byte(strings.Replace(indexHTML, targetMinsToken, strconv.Itoa(s.targetMinutes()), 1)))
+}
+
+// targetMinutes is the configured workday length in minutes, defaulting to 7h.
+func (s *Server) targetMinutes() int {
+	s.mu.Lock()
+	hours := s.cfg.WorkdayHours
+	s.mu.Unlock()
+	if hours <= 0 {
+		hours = 7
+	}
+	return int(hours * 60)
 }
 
 // planToView converts a model.DayPlan to a DayView.
@@ -2633,6 +2645,9 @@ loadConfig(); loadCredStatus();
 }
 
 // indexHTML is the single-page review UI, embedded directly.
+// targetMinsToken is substituted with the configured workday length on serve.
+const targetMinsToken = "__TARGET_MINS__"
+
 const indexHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -2801,6 +2816,9 @@ function toast(msg, err) {
   setTimeout(() => el.style.display='none', err ? 8000 : 3500);
 }
 
+// TARGET_MINS is the configured workday length, injected by the server.
+const TARGET_MINS = __TARGET_MINS__;
+
 function hm(mins) {
   const h = Math.floor(mins/60), m = mins%60;
   if (h===0) return m+'m';
@@ -2820,14 +2838,14 @@ function jiraMins(day) {
     .reduce((a,w)=>a+w.minutes,0);
 }
 
-// isIncomplete: a day is incomplete if Jira has less than 7h logged.
+// isIncomplete: a day is incomplete if Jira has less than the target logged.
 // Holiday and full_leave days are always considered complete.
 // Future days (after today) are never shown as incomplete.
 function isIncomplete(day) {
   if (!day) return false;
   if (day.status==='holiday' || day.status==='full_leave') return false;
   if (day.date > todayStr()) return false;
-  return jiraMins(day) < 420;
+  return jiraMins(day) < TARGET_MINS;
 }
 
 // renderList updates the date picker, the toolbar count, and the incomplete panel.
@@ -2857,7 +2875,7 @@ function renderList() {
     const logCls = rMins===0?'empty':'partial';
     return '<div class="'+cls+'" onclick="selectDay(\''+d.date+'\')">'
       +'<span class="iday-date">'+d.date+'</span>'
-      +'<span class="iday-logged '+logCls+'">'+hm(rMins)+' / 7h</span>'
+      +'<span class="iday-logged '+logCls+'">'+hm(rMins)+' / '+hm(TARGET_MINS)+'</span>'
       +'<span class="iday-wd">'+d.weekday+' \u2022 '+d.status.replace('_',' ')+'</span>'
       +'</div>';
   }).join('');
@@ -2946,7 +2964,7 @@ function renderDetail(day) {
   const existMins = (day.existing||[]).reduce((a,w)=>a+w.minutes,0);
   const suggMins = (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
   const total = existMins + suggMins;
-  const dayFull = existMins >= 420;
+  const dayFull = existMins >= TARGET_MINS;
 
   let html = '<div class="day-nav">'
     +'<button class="nav-btn" onclick="gotoDay(-1)" title="Previous day">‹</button>'
@@ -3042,14 +3060,14 @@ function renderDetail(day) {
   }
 
   // Summary line — always shown. Balance replaces Total whenever the day does
-  // not add up to the 7h target, since that is the number the user acts on.
-  const balance = 420 - total;
+  // not add up to the target, since that is the number the user acts on.
+  const balance = TARGET_MINS - total;
   const lastCell = balance === 0
     ? '<span style="color:#6b778c">Total: <strong class="total-ok">'+hm(total)+'</strong></span>'
     : '<span style="color:#6b778c">Balance: <strong class="total-warn">'
         +(balance<0?'-':'')+hm(Math.abs(balance))+'</strong></span>';
   html += '<div class="summary-line">'
-    +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">7h</strong></span>'
+    +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">'+hm(TARGET_MINS)+'</strong></span>'
     +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
     +'<span style="color:#6b778c">Existing: <strong style="color:#172b4d">'+hm(existMins)+'</strong></span>'
     +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
@@ -3231,11 +3249,11 @@ function addRowWithKey(key) {
   const day = getDayLocal(currentDate);
   if (!day) return;
   day.suggested = day.suggested || [];
-  // Default time = remaining minutes needed to reach 7h target (420 min),
+  // Default time = remaining minutes needed to reach the target,
   // capped at 30 min minimum and rounded to the nearest 30-min block.
   const existMins = (day.existing||[]).reduce((a,w)=>a+w.minutes,0);
   const suggMins = (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
-  const remaining = Math.max(30, 420 - existMins - suggMins);
+  const remaining = Math.max(30, TARGET_MINS - existMins - suggMins);
   const defaultMins = Math.round(remaining / 30) * 30 || 30;
   day.suggested.push({issueKey:key, minutes:defaultMins, comment:'', category:'manual'});
   const newIdx = day.suggested.length - 1;
@@ -3480,7 +3498,7 @@ async function init() {
 
 init();
 // buildIncompleteDaysInBackground fetches the full plan for every stub day
-// that is incomplete (Jira < 7h). Days already at or above target are
+// that is incomplete (Jira below target). Days already at or above target are
 // skipped — there is nothing to build or suggest for them.
 // Runs sequentially with a small pause between requests to avoid hammering
 // the server while the user is working.

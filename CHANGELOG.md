@@ -11,6 +11,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - The product is displayed as "Time Reporting Assistant" throughout the UI, tray, installer and setup
 
+### Fixed
+- The review UI ignored the `workdayHours` setting: the daily target was hard-coded to 7h in the summary line, the "incomplete day" test, the "logged / 7h" labels and the default time for a new row. All of them now use the configured value, which the server injects into the page
+
 ## [0.32.0-beta.3] — 2026-08-03
 ### Added
 - "Open time report" now opens the window immediately with a spinner explaining that git activity, calendar events and Jira issues are being collected, instead of leaving a blank unresponsive frame during the wait

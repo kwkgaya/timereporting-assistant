@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kwkgaya/timereporting-assistant/internal/config"
 	"github.com/kwkgaya/timereporting-assistant/internal/jira"
 	"github.com/kwkgaya/timereporting-assistant/internal/mockjira"
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
@@ -129,6 +131,32 @@ func TestIndexRendersHTML(t *testing.T) {
 	ct := resp.Header.Get("Content-Type")
 	if !bytes.Contains([]byte(ct), []byte("text/html")) {
 		t.Errorf("content-type = %q, want text/html", ct)
+	}
+}
+
+func TestIndexInjectsConfiguredTarget(t *testing.T) {
+	srv, _ := makeTestServer(t)
+	srv.WithConfig(config.Config{
+		WorkdayHours: 8,
+		Jira:         config.JiraConfig{BaseURL: "https://example.atlassian.net"},
+		JiraAPIToken: "token",
+	}, "")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(resp)
+
+	// A leftover token is a JavaScript syntax error that blanks the whole page.
+	if strings.Contains(body, targetMinsToken) {
+		t.Error("target placeholder was not substituted")
+	}
+	if !strings.Contains(body, "const TARGET_MINS = 480;") {
+		t.Error("8h workday was not injected as 480 minutes")
 	}
 }
 
