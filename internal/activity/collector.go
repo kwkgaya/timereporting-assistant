@@ -5,6 +5,7 @@
 package activity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,21 @@ import (
 
 	"github.com/kwkgaya/timereporting-assistant/internal/model"
 )
+
+// gitTimeout bounds every git invocation. Without it a repository on a stalled
+// network share, or a git that stops to prompt for credentials, blocks the day
+// build forever and the whole app appears hung.
+const gitTimeout = 30 * time.Second
+
+// gitCommand builds a git command that is killed if it outlives gitTimeout.
+// The returned cancel func must be called once the command has completed.
+func gitCommand(bin string, args ...string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	// Never let git stop for an interactive credential or SSH prompt.
+	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=echo", "SSH_ASKPASS=echo")
+	return cmd, cancel
+}
 
 // Source tag constants used in model.Activity.Source.
 const (
@@ -234,7 +250,8 @@ func (g *GitCollector) groupByOrigin() map[string][]string {
 
 // remoteURL returns the fetch URL of the "origin" remote, or "" on failure.
 func (g *GitCollector) remoteURL(repoPath string) string {
-	cmd := exec.Command(g.gitBin, "-C", repoPath, "remote", "get-url", "origin")
+	cmd, cancel := gitCommand(g.gitBin, "-C", repoPath, "remote", "get-url", "origin")
+	defer cancel()
 	hideCmd(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -261,7 +278,8 @@ func (g *GitCollector) collectRepo(repoPath, after, before string, seenHash map[
 		args = append(args, "--author="+author)
 	}
 
-	cmd := exec.Command(g.gitBin, args...)
+	cmd, cancel := gitCommand(g.gitBin, args...)
+	defer cancel()
 	hideCmd(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -338,7 +356,8 @@ func (g *GitCollector) collectReflog(repoPath, after, before string, seenHash ma
 		args = append(args, "--author="+a)
 	}
 
-	cmd := exec.Command(g.gitBin, args...)
+	cmd, cancel := gitCommand(g.gitBin, args...)
+	defer cancel()
 	hideCmd(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -426,8 +445,9 @@ func branchFromDecorations(d string) string {
 // branchContaining returns the first branch that contains the given commit, or
 // "" when the commit is not reachable from any branch (orphaned/rebased away).
 func (g *GitCollector) branchContaining(repoPath, hash string) string {
-	cmd := exec.Command(g.gitBin, "-C", repoPath, "branch", "--all",
+	cmd, cancel := gitCommand(g.gitBin, "-C", repoPath, "branch", "--all",
 		"--contains", hash, "--format=%(refname:short)")
+	defer cancel()
 	hideCmd(cmd)
 	out, err := cmd.Output()
 	if err != nil {

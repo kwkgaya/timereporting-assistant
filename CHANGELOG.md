@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.31.0-beta.2] — 2026-08-03
+### Fixed
+- **Application hang on Submit (present since 0.30.x).** Three independent defects, each of which could freeze the whole app:
+  - Changing a day's status rebuilt the day plan (git + Jira + GitHub + calendar, potentially minutes) **while holding the global server lock**, so every other request — including Submit — blocked until it finished. The rebuild now runs unlocked.
+  - A panic inside any handler left the global lock permanently held, because critical sections unlocked explicitly rather than with `defer`. Every later request then blocked forever. Lock handling is now panic-safe and a recovery middleware returns a JSON 500 instead of dropping the connection.
+  - `POST /days/{date}/rows/{i}/submit` released the lock across the Jira call and then reused the now-stale day index and row index. When the background rebuild of incomplete days replaced the day in that window, the resulting out-of-range panic wedged the server. The day and row are now re-resolved after the call.
+- Every `git` invocation now has a 30 s timeout and interactive credential prompts are disabled, so a stalled repository can no longer block a day build indefinitely
+- The blocking "Building day plan…" overlay is reference counted, so overlapping operations can no longer leave it stuck on screen
+- Browser requests now time out after 3 minutes and non-JSON error responses (e.g. CSRF rejections) surface their real message instead of a parse error
+
 ## [0.31.0-beta.1] — 2026-08-03
 ### Added
 - Calendar health warning: an amber banner is shown when the published calendar URL fails to load, when no calendar is configured, or when the calendar loads but contains no events (a revoked Outlook publish link still returns a valid but empty feed)

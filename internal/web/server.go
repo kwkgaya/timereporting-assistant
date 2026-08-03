@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -220,7 +222,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /wizard", s.handleWizard)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /", s.handleIndex)
-	return csrfMiddleware(mux, s.port)
+	return recoverMiddleware(csrfMiddleware(mux, s.port))
+}
+
+// withLock runs fn with s.mu held and always releases it, even if fn panics.
+// Most critical sections in this file unlock explicitly (they have to, because
+// they release the lock around slow network calls); a panic inside one of those
+// would strand s.mu forever and wedge every subsequent request. Use withLock for
+// any section that indexes into s.days, where an out-of-range panic is possible.
+func (s *Server) withLock(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn()
+}
+
+// recoverMiddleware turns a handler panic into a JSON 500 instead of an abruptly
+// closed connection. Without it the browser's fetch() rejects with an opaque
+// network error, and any in-flight UI overlay is left on screen.
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
+				log.Printf("panic serving %s %s: %v\n%s", r.Method, r.URL.Path, rec, debug.Stack())
+				writeErr(w, http.StatusInternalServerError, fmt.Sprintf("internal error: %v", rec))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // csrfMiddleware rejects state-changing requests (POST/PUT/DELETE/PATCH) that
@@ -977,13 +1008,39 @@ func (s *Server) apiPutDay(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// A status change back to "working" triggers a full rebuild, which shells out
+	// to git, Jira, GitHub and the calendar and can take minutes. It must run
+	// WITHOUT s.mu held: holding the global lock across it blocks every other
+	// request, which freezes the whole UI (the SPA overlay never hides).
+	var rebuilt []WlogView
+	rebuiltOK := false
+	if body.Status != "" {
+		s.mu.Lock()
+		idx, ok := s.dayIndex[date]
+		snapshot := DayView{}
+		cfg := s.cfg
+		builder := s.dayBuilder
+		changing := ok && body.Status != s.days[idx].Status
+		if changing {
+			snapshot = s.days[idx]
+			snapshot.Status = body.Status
+		}
+		s.mu.Unlock()
+		if changing {
+			rebuilt = suggestionsForStatus(snapshot, date, cfg, builder)
+			rebuiltOK = true
+		}
+	}
+
 	s.mu.Lock()
 	idx, ok := s.dayIndex[date]
 	if ok {
 		if body.Status != "" && body.Status != s.days[idx].Status {
 			s.days[idx].Status = body.Status
-			// Rebuild suggested worklogs to match the new status.
-			s.days[idx].Suggested = s.rebuildSuggestionsForStatus(idx, date)
+			// Apply the suggestions rebuilt above (unlocked).
+			if rebuiltOK {
+				s.days[idx].Suggested = rebuilt
+			}
 		}
 		if body.Suggested != nil {
 			s.days[idx].Suggested = body.Suggested
@@ -1001,11 +1058,10 @@ func (s *Server) apiPutDay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// rebuildSuggestionsForStatus returns appropriate suggested worklogs for the given
-// day index based on its current status. Called with s.mu held.
-func (s *Server) rebuildSuggestionsForStatus(idx int, date string) []WlogView {
-	day := s.days[idx]
-	cfg := s.cfg
+// suggestionsForStatus returns appropriate suggested worklogs for a day based on
+// its status. It is a pure function of its arguments and must be called WITHOUT
+// s.mu held — the "working" branch invokes the day builder, which is slow.
+func suggestionsForStatus(day DayView, date string, cfg config.Config, dayBuilder DayBuilder) []WlogView {
 	target := int(cfg.WorkdayHours * 60)
 	existingMins := 0
 	for _, w := range day.Existing {
@@ -1036,8 +1092,8 @@ func (s *Server) rebuildSuggestionsForStatus(idx int, date string) []WlogView {
 		}
 		return out
 	default: // working — trigger a full rebuild if a builder is available
-		if s.dayBuilder != nil {
-			plan, err := s.dayBuilder(cfg, t)
+		if dayBuilder != nil {
+			plan, err := dayBuilder(cfg, t)
 			if err == nil {
 				var out []WlogView
 				for _, wl := range plan.Suggested {
@@ -1134,6 +1190,18 @@ func (s *Server) apiSubmitDay(w http.ResponseWriter, r *http.Request) {
 	if !body.DryRun {
 		// Move submitted worklogs to Existing, remove them from Suggested.
 		s.mu.Lock()
+		// Re-resolve: s.mu was released across the network calls above, so the
+		// index captured earlier may no longer be valid.
+		idx, stillThere := s.dayIndex[date]
+		if !stillThere || idx < 0 || idx >= len(s.days) {
+			s.mu.Unlock()
+			writeJSON(w, http.StatusOK, map[string]any{
+				"submitted": submitted,
+				"dryRun":    body.DryRun,
+				"target":    writeLabel,
+			})
+			return
+		}
 		for i := range submitted {
 			submitted[i].Category = string(model.CategoryExisting)
 			submitted[i].Source = src
@@ -1179,22 +1247,29 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	idx, ok := s.dayIndex[date]
-	s.mu.Unlock()
+	var wl WlogView
+	var ok, inRange bool
+	s.withLock(func() {
+		var idx int
+		idx, ok = s.dayIndex[date]
+		if !ok || idx < 0 || idx >= len(s.days) {
+			ok = false
+			return
+		}
+		if rowIdx < 0 || rowIdx >= len(s.days[idx].Suggested) {
+			return
+		}
+		inRange = true
+		wl = s.days[idx].Suggested[rowIdx]
+	})
 	if !ok {
 		writeErr(w, http.StatusNotFound, "date not found: "+date)
 		return
 	}
-
-	s.mu.Lock()
-	if rowIdx < 0 || rowIdx >= len(s.days[idx].Suggested) {
-		s.mu.Unlock()
+	if !inRange {
 		writeErr(w, http.StatusBadRequest, "row index out of range")
 		return
 	}
-	wl := s.days[idx].Suggested[rowIdx]
-	s.mu.Unlock()
 
 	if wl.Submitted {
 		writeErr(w, http.StatusConflict, "row already submitted")
@@ -1212,14 +1287,18 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 	day, _ := time.Parse("2006-01-02", date)
 	started := model.WorklogStart(day)
 
-	s.mu.Lock()
-	client, writeLabel, cerr := s.writeClientLocked()
-	// Determine the source label for the new existing worklog.
-	src := "real"
-	if s.activeWrite == "mock" {
-		src = "mock"
-	}
-	s.mu.Unlock()
+	var client *jira.Client
+	var writeLabel string
+	var cerr error
+	var src string
+	s.withLock(func() {
+		client, writeLabel, cerr = s.writeClientLocked()
+		// Determine the source label for the new existing worklog.
+		src = "real"
+		if s.activeWrite == "mock" {
+			src = "mock"
+		}
+	})
 	if cerr != nil {
 		writeErr(w, http.StatusBadRequest, cerr.Error())
 		return
@@ -1232,6 +1311,16 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	// Re-resolve the day: s.mu was released for the duration of the network call
+	// above, during which a reload or a background day rebuild may have replaced
+	// s.days entirely. Reusing the old index/row here previously caused an
+	// out-of-range panic that left s.mu locked forever, wedging the whole app.
+	idx, ok := s.dayIndex[date]
+	if !ok || idx < 0 || idx >= len(s.days) {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"day": DayView{Date: date}, "target": writeLabel})
+		return
+	}
 	// Move the submitted row into Existing and remove it from Suggested.
 	existingWL := WlogView{
 		ID:       created.ID,
@@ -1242,9 +1331,27 @@ func (s *Server) apiSubmitRow(w http.ResponseWriter, r *http.Request) {
 		Source:   src,
 	}
 	s.days[idx].Existing = append(s.days[idx].Existing, existingWL)
-	// Remove the row from Suggested (keep others intact).
+	// Remove the row from Suggested (keep others intact). The slice may have
+	// shrunk while unlocked, so match on identity rather than the stale index.
 	sugg := s.days[idx].Suggested
-	s.days[idx].Suggested = append(sugg[:rowIdx], sugg[rowIdx+1:]...)
+	removeAt := -1
+	if rowIdx >= 0 && rowIdx < len(sugg) &&
+		sugg[rowIdx].IssueKey == wl.IssueKey && sugg[rowIdx].Comment == wl.Comment {
+		removeAt = rowIdx
+	} else {
+		for i := range sugg {
+			if sugg[i].IssueKey == wl.IssueKey && sugg[i].Comment == wl.Comment && sugg[i].Minutes == wl.Minutes {
+				removeAt = i
+				break
+			}
+		}
+	}
+	if removeAt >= 0 {
+		out := make([]WlogView, 0, len(sugg)-1)
+		out = append(out, sugg[:removeAt]...)
+		out = append(out, sugg[removeAt+1:]...)
+		s.days[idx].Suggested = out
+	}
 	d := s.days[idx]
 	s.mu.Unlock()
 
@@ -2630,8 +2737,26 @@ let currentDate = null;
 async function api(method, path, body) {
   const opts = {method, headers:{'Content-Type':'application/json'}};
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const r = await fetch('/api' + path, opts);
-  const data = await r.json();
+  // Hard cap every request. Building a day can legitimately take a while, but
+  // without a timeout a stuck request leaves the blocking overlay up forever
+  // and the app looks hung.
+  const ctl = new AbortController();
+  const timer = setTimeout(()=>ctl.abort(), 180000);
+  opts.signal = ctl.signal;
+  let r;
+  try {
+    r = await fetch('/api' + path, opts);
+  } catch(e) {
+    if (e.name === 'AbortError') throw new Error('The request timed out after 3 minutes. Check Settings and try again.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  // Errors from middleware (e.g. CSRF) are plain text, not JSON.
+  const text = await r.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; }
+  catch(_) { if (!r.ok) throw new Error(text || r.statusText); throw new Error('Unexpected response from the server.'); }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
@@ -2749,13 +2874,19 @@ async function fetchAndShowDay(date) {
   }
 }
 
+// The overlay blocks all input, so it is reference counted: two overlapping
+// operations must not let the first one to finish unblock the UI, and the
+// second one to finish must always clear it.
+let _overlayDepth = 0;
 function showOverlay(msg) {
+  _overlayDepth++;
   const ov = document.getElementById('day-overlay');
   document.getElementById('day-overlay-msg').textContent = msg || 'Building day plan…';
   ov.style.display = 'flex';
 }
 function hideOverlay() {
-  document.getElementById('day-overlay').style.display = 'none';
+  _overlayDepth = Math.max(0, _overlayDepth - 1);
+  if (_overlayDepth === 0) document.getElementById('day-overlay').style.display = 'none';
 }
 
 // gotoIncomplete moves to the next/previous incomplete day (dir = +1 / -1).
