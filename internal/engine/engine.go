@@ -197,6 +197,12 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		notes = append(notes, fmt.Sprintf("%d activity item(s) have no Jira key — assign in UI", len(grouped.Unassigned)))
 	}
 
+	// Almost every working day has at least one calendar event, so none at all
+	// usually means the published calendar URL is stale rather than a free day.
+	if len(meetings) == 0 {
+		notes = append(notes, "no calendar events found for this day — check the calendar URL in Settings if that looks wrong")
+	}
+
 	plan.Notes = notes
 	return plan
 }

@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.32.0-beta.1] — 2026-08-03
+### Added
+- **Recurring calendar events are now expanded.** The ICS parser ignored `RRULE` entirely, so every repeating meeting — daily standups, weekly syncs, monthly retros — was silently dropped and most days looked like they had no meetings at all. Supports `FREQ=DAILY/WEEKLY/MONTHLY/YEARLY` with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (including ordinals such as `2TU` and `-1FR`), `BYMONTHDAY` and `BYSETPOS`, plus `EXDATE` exclusions and `RECURRENCE-ID` rescheduled instances
+- Per-day note when a working day has no calendar events at all, since that usually means a stale calendar rather than a genuinely meeting-free day
+
+### Fixed
+- The calendar warning was only computed on the full plan build and read by the UI once at page load, so it never appeared. It is now recomputed on every day build and the banners are refreshed after loading and every 30 s
+
 ## [0.31.0-beta.2] — 2026-08-03
 ### Fixed
 - **Application hang on Submit (present since 0.30.x).** Three independent defects, each of which could freeze the whole app:

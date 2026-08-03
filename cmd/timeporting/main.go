@@ -356,8 +356,10 @@ func runMain() {
 			return engine.BuildDayPlan(ec, day, model.StatusWorking, ex, nil, nil), nil
 		}
 
-		var meetings []model.Meeting
-		meetings, _ = loadMeetings(c)
+		meetings, merr := loadMeetings(c)
+		if webSrv != nil {
+			webSrv.WithCalendarWarning(calendarWarning(c, meetings, merr))
+		}
 		dayMeetings := ics.MeetingsForDay(meetings, day)
 		dayStatus := model.StatusWorking
 		if ics.IsHolidayDay(meetings, day) {

@@ -152,7 +152,6 @@ func (s *Server) WithCredentialError(msg string) *Server {
 }
 
 // WithCalendarWarning records a calendar load problem to surface in the UI.
-// Must not be called from the day builder — that runs with s.mu already held.
 func (s *Server) WithCalendarWarning(msg string) *Server {
 	s.mu.Lock()
 	s.calWarning = msg
@@ -3465,18 +3464,27 @@ async function buildIncompleteDaysInBackground() {
   }
 }
 
-async function init() {
+// The calendar is loaded lazily (in the background at startup and again on every
+// day build), so the warning usually is not known yet when the page first loads.
+// Re-read it whenever days change and on a slow poll.
+async function refreshBanners() {
   try {
     const st = await api('GET','/status');
+    const cred = document.getElementById('cred-banner');
     if (st.credError) {
       document.getElementById('cred-banner-msg').textContent = st.credError;
-      document.getElementById('cred-banner').style.display = 'flex';
-    }
+      cred.style.display = 'flex';
+    } else { cred.style.display = 'none'; }
+    const cal = document.getElementById('cal-banner');
     if (st.calWarning) {
       document.getElementById('cal-banner-msg').textContent = st.calWarning;
-      document.getElementById('cal-banner').style.display = 'flex';
-    }
+      cal.style.display = 'flex';
+    } else { cal.style.display = 'none'; }
   } catch(_) {}
+}
+
+async function init() {
+  await refreshBanners();
   try {
     days = await api('GET','/days');
     renderList();
@@ -3485,10 +3493,12 @@ async function init() {
       // Always fetch the first day from the server so the full plan
       // (git/ICS activity) is built even if stubs were returned on startup.
       await fetchAndShowDay(first.date);
+      refreshBanners();
     }
     // Build remaining incomplete stub days in the background.
     buildIncompleteDaysInBackground();
   } catch(e) { toast('Failed to load days: '+e.message, true); }
+  setInterval(refreshBanners, 30000);
 }
 
 init();

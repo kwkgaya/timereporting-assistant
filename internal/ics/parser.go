@@ -53,55 +53,113 @@ func ParseURL(rawURL string) ([]model.Meeting, error) {
 	return Parse(resp.Body)
 }
 
-// Parse reads iCalendar data from r and returns meeting events.
+// vevent is a raw calendar event before recurrence expansion.
+type vevent struct {
+	uid        string
+	start, end time.Time
+	summary    string
+	declined   bool
+	rruleRaw   string
+	exdates    []time.Time
+	recurID    time.Time
+	hasRecurID bool
+}
+
+// Parse reads iCalendar data from r and returns meeting events. Recurring
+// events are expanded into individual occurrences.
 func Parse(r io.Reader) ([]model.Meeting, error) {
 	lines, err := unfold(r)
 	if err != nil {
 		return nil, err
 	}
-	var meetings []model.Meeting
+	var events []vevent
+	var cur vevent
 	var inEvent bool
-	var dtstart, dtend time.Time
-	var summary string
-	var declined bool
-
-	reset := func() {
-		inEvent = false
-		dtstart = time.Time{}
-		dtend = time.Time{}
-		summary = ""
-		declined = false
-	}
 
 	for _, line := range lines {
 		name, params, value := splitLine(line)
 		switch {
 		case name == "BEGIN" && value == "VEVENT":
-			reset()
+			cur = vevent{}
 			inEvent = true
 		case name == "END" && value == "VEVENT" && inEvent:
-			if !declined && !dtstart.IsZero() && !dtend.IsZero() && dtend.After(dtstart) {
-				meetings = append(meetings, model.Meeting{
-					Date:    model.Day(dtstart),
-					Start:   dtstart,
-					End:     dtend,
-					Summary: summary,
-				})
+			if !cur.declined && !cur.start.IsZero() && !cur.end.IsZero() && cur.end.After(cur.start) {
+				events = append(events, cur)
 			}
-			reset()
-		case inEvent && name == "SUMMARY":
-			summary = decodeValue(value)
-		case inEvent && (name == "DTSTART" || strings.HasPrefix(name, "DTSTART;")):
-			dtstart = parseDateTime(value, params)
-		case inEvent && (name == "DTEND" || strings.HasPrefix(name, "DTEND;")):
-			dtend = parseDateTime(value, params)
-		case inEvent && name == "ATTENDEE":
+			inEvent = false
+		case !inEvent:
+			// Outside a VEVENT (VTIMEZONE, VCALENDAR headers) — ignore.
+		case name == "SUMMARY":
+			cur.summary = decodeValue(value)
+		case name == "UID":
+			cur.uid = value
+		case name == "DTSTART":
+			cur.start = parseDateTime(value, params)
+		case name == "DTEND":
+			cur.end = parseDateTime(value, params)
+		case name == "RRULE":
+			cur.rruleRaw = value
+		case name == "EXDATE":
+			for _, v := range strings.Split(value, ",") {
+				if t := parseDateTime(strings.TrimSpace(v), params); !t.IsZero() {
+					cur.exdates = append(cur.exdates, t)
+				}
+			}
+		case name == "RECURRENCE-ID":
+			cur.recurID = parseDateTime(value, params)
+			cur.hasRecurID = !cur.recurID.IsZero()
+		case name == "ATTENDEE":
 			if isDeclined(params, value) {
-				declined = true
+				cur.declined = true
 			}
 		}
 	}
-	return meetings, nil
+	return expandEvents(events, time.Now().UTC()), nil
+}
+
+// expandEvents turns raw VEVENTs into meetings, expanding recurrence rules and
+// honouring EXDATE exclusions and RECURRENCE-ID overrides.
+func expandEvents(events []vevent, now time.Time) []model.Meeting {
+	// A VEVENT with RECURRENCE-ID is a rescheduled instance of its series; the
+	// generated occurrence for that date must be dropped in favour of it.
+	overrides := map[string]bool{}
+	for _, e := range events {
+		if e.hasRecurID {
+			overrides[e.uid+"|"+model.Day(e.recurID).Format("2006-01-02")] = true
+		}
+	}
+	from := now.AddDate(-expandYearsBack, 0, 0)
+	to := now.AddDate(expandYearsForward, 0, 0)
+
+	var out []model.Meeting
+	add := func(e vevent, start, end time.Time) {
+		out = append(out, model.Meeting{
+			Date:    model.Day(start),
+			Start:   start,
+			End:     end,
+			Summary: e.summary,
+		})
+	}
+	for _, e := range events {
+		r, ok := parseRRule(e.rruleRaw)
+		if e.rruleRaw == "" || e.hasRecurID || !ok {
+			add(e, e.start, e.end)
+			continue
+		}
+		dur := e.end.Sub(e.start)
+		excluded := map[string]bool{}
+		for _, x := range e.exdates {
+			excluded[model.Day(x).Format("2006-01-02")] = true
+		}
+		for _, s := range r.occurrences(e.start, from, to) {
+			key := model.Day(s).Format("2006-01-02")
+			if excluded[key] || overrides[e.uid+"|"+key] {
+				continue
+			}
+			add(e, s, s.Add(dur))
+		}
+	}
+	return out
 }
 
 // MeetingsForDay returns meetings from all that fall on the given UTC day.
