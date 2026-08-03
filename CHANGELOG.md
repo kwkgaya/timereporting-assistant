@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+### Added
+- Cancelled meetings are excluded from the day's time. A calendar entry whose title is a cancellation notice (`Cancelled - …`, `Canceled: …`) or that carries `STATUS:CANCELLED` no longer contributes suggested time. Titles that merely start with the word, such as "Cancelled flights follow-up", are kept — a separator is required
+- The day summary line now reports a **Balance** — the time still missing from (or logged over) the 7h target. Balance replaces **Total**, so exactly one of the two is shown: Total only when the day lands exactly on target, Balance otherwise
+
+### Changed
+- The product is displayed as "Time Reporting Assistant" throughout the UI, tray, installer and setup
 
 ## [0.32.0-beta.3] — 2026-08-03
 ### Added

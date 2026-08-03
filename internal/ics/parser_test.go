@@ -53,8 +53,44 @@ func TestParse_DeclinedExcluded(t *testing.T) {
 	}
 }
 
-func TestParse_MeetingsForDay(t *testing.T) {
-	meetings, err := Parse(strings.NewReader(sampleICS))
+func TestParse_CancelledExcluded(t *testing.T) {
+	const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20260601T090000Z
+DTEND:20260601T100000Z
+SUMMARY:Cancelled - Sprint review
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260601T110000Z
+DTEND:20260601T120000Z
+SUMMARY:Canceled: Design sync
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260601T130000Z
+DTEND:20260601T140000Z
+SUMMARY:Retro
+STATUS:CANCELLED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260601T150000Z
+DTEND:20260601T160000Z
+SUMMARY:Cancelled flights follow-up
+END:VEVENT
+END:VCALENDAR`
+
+	meetings, err := Parse(strings.NewReader(ics))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(meetings) != 1 {
+		t.Fatalf("got %d meetings, want 1: %+v", len(meetings), meetings)
+	}
+	if meetings[0].Summary != "Cancelled flights follow-up" {
+		t.Errorf("kept %q, want the non-cancellation title", meetings[0].Summary)
+	}
+}
+
+func TestParse_MeetingsForDay(t *testing.T) {	meetings, err := Parse(strings.NewReader(sampleICS))
 	if err != nil {
 		t.Fatal(err)
 	}

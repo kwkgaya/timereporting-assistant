@@ -2946,7 +2946,6 @@ function renderDetail(day) {
   const existMins = (day.existing||[]).reduce((a,w)=>a+w.minutes,0);
   const suggMins = (day.suggested||[]).reduce((a,w)=>a+w.minutes,0);
   const total = existMins + suggMins;
-  const totalCls = total>=420?'total-ok':'total-warn';
   const dayFull = existMins >= 420;
 
   let html = '<div class="day-nav">'
@@ -3042,7 +3041,13 @@ function renderDetail(day) {
     html += '</table>';
   }
 
-  // Summary line — always shown.
+  // Summary line — always shown. Balance replaces Total whenever the day does
+  // not add up to the 7h target, since that is the number the user acts on.
+  const balance = 420 - total;
+  const lastCell = balance === 0
+    ? '<span style="color:#6b778c">Total: <strong class="total-ok">'+hm(total)+'</strong></span>'
+    : '<span style="color:#6b778c">Balance: <strong class="total-warn">'
+        +(balance<0?'-':'')+hm(Math.abs(balance))+'</strong></span>';
   html += '<div class="summary-line">'
     +'<span style="color:#6b778c">Target: <strong style="color:#172b4d">7h</strong></span>'
     +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
@@ -3050,7 +3055,7 @@ function renderDetail(day) {
     +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
     +'<span style="color:#6b778c">Suggested: <strong style="color:#0052cc">'+hm(suggMins)+'</strong></span>'
     +'<span style="color:#dfe1e6;margin:0 10px">|</span>'
-    +'<span style="color:#6b778c">Total: <strong class="'+totalCls+'">'+hm(total)+'</strong></span>'
+    +lastCell
     +'</div>';
 
   // Submit actions — only when day still has unsubmitted rows that cover remaining time.

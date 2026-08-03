@@ -32,12 +32,12 @@ test.describe('Day list', () => {
     expect(next).not.toBe(initial);
   });
 
-  test('summary line always shows Target / Existing / Suggested / Total', async ({ app }) => {
+  test('summary line always shows Target / Existing / Suggested and Balance or Total', async ({ app }) => {
     await app.locator('.iday-item').first().click();
     await app.waitForSelector('.summary-line');
     await expect(app.locator('.summary-line')).toContainText('Target:');
     await expect(app.locator('.summary-line')).toContainText('Existing:');
     await expect(app.locator('.summary-line')).toContainText('Suggested:');
-    await expect(app.locator('.summary-line')).toContainText('Total:');
+    await expect(app.locator('.summary-line')).toContainText(/Balance:|Total:/);
   });
 });

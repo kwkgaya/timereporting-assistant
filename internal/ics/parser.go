@@ -1,7 +1,8 @@
 // Package ics parses iCalendar (.ics) files to extract meeting events for
 // a given date. Only VEVENT components are considered. Events the user
-// declined (PARTSTAT=DECLINED) are excluded. All-day events, public holidays,
-// and focus-time holds are included (per user preference).
+// declined (PARTSTAT=DECLINED) and cancelled events are excluded. All-day
+// events, public holidays, and focus-time holds are included (per user
+// preference).
 package ics
 
 import (
@@ -59,6 +60,7 @@ type vevent struct {
 	start, end time.Time
 	summary    string
 	declined   bool
+	cancelled  bool
 	rruleRaw   string
 	exdates    []time.Time
 	recurID    time.Time
@@ -83,7 +85,7 @@ func Parse(r io.Reader) ([]model.Meeting, error) {
 			cur = vevent{}
 			inEvent = true
 		case name == "END" && value == "VEVENT" && inEvent:
-			if !cur.declined && !cur.start.IsZero() && !cur.end.IsZero() && cur.end.After(cur.start) {
+			if !cur.declined && !cur.cancelled && !cur.start.IsZero() && !cur.end.IsZero() && cur.end.After(cur.start) {
 				events = append(events, cur)
 			}
 			inEvent = false
@@ -91,6 +93,13 @@ func Parse(r io.Reader) ([]model.Meeting, error) {
 			// Outside a VEVENT (VTIMEZONE, VCALENDAR headers) — ignore.
 		case name == "SUMMARY":
 			cur.summary = decodeValue(value)
+			if isCancelledTitle(cur.summary) {
+				cur.cancelled = true
+			}
+		case name == "STATUS":
+			if strings.EqualFold(strings.TrimSpace(value), "CANCELLED") {
+				cur.cancelled = true
+			}
 		case name == "UID":
 			cur.uid = value
 		case name == "DTSTART":
@@ -296,6 +305,25 @@ func isDeclined(params, _ string) bool {
 		}
 	}
 	return false
+}
+
+// isCancelledTitle reports whether a summary is an organiser's cancellation
+// notice, e.g. "Cancelled - Sprint review" or "Canceled: Sprint review".
+// A separator is required so ordinary titles like "Cancelled flights" are kept.
+func isCancelledTitle(summary string) bool {
+	s := strings.TrimSpace(summary)
+	var rest string
+	switch {
+	case len(s) >= 9 && strings.EqualFold(s[:9], "cancelled"):
+		rest = s[9:]
+	case len(s) >= 8 && strings.EqualFold(s[:8], "canceled"):
+		rest = s[8:]
+	default:
+		return false
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	return strings.HasPrefix(rest, "-") || strings.HasPrefix(rest, ":") ||
+		strings.HasPrefix(rest, "–") || strings.HasPrefix(rest, "—")
 }
 
 // decodeValue handles basic text unescaping per RFC 5545 (\\, \n, \,).
