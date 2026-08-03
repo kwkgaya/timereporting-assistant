@@ -78,12 +78,19 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $iconSrc = "internal/trayapp/assets/icon.ico"
-          $winresDir = "cmd/tray/winres"
-          Copy-Item $iconSrc "$winresDir/icon.ico"
-          go run github.com/tc-hib/go-winres@latest make --in "$winresDir/winres.json" --out "cmd/tray/"
+          # Embed the icon into every shipped exe so Explorer, the taskbar,
+          # Alt-Tab and the shortcuts all show it. --out is a path PREFIX, so it
+          # must not end in "/" — Go ignores files whose name starts with "_".
+          foreach ($pkg in @("tray", "timeporting", "mockjira")) {
+            Copy-Item $iconSrc "cmd/$pkg/winres/icon.ico"
+            go run github.com/tc-hib/go-winres@latest make --in "cmd/$pkg/winres/winres.json" --out "cmd/$pkg/rsrc"
+            if ($LASTEXITCODE -ne 0) { Write-Error "go-winres failed for cmd/$pkg"; exit 1 }
+            if (-not (Test-Path "cmd/$pkg/rsrc_windows_amd64.syso")) { Write-Error "no .syso for cmd/$pkg"; exit 1 }
+          }
           go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\timeporting.exe .\cmd\timeporting
           go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\mockjira.exe .\cmd\mockjira
           go build -trimpath -ldflags "-s -w -X main.version=$v -H windowsgui" -o dist\tray.exe .\cmd\tray
+          Copy-Item $iconSrc dist\icon.ico
           Copy-Item config.example.json dist\
           Copy-Item README.md dist\
 

@@ -12,6 +12,10 @@
 go.work
 go.work.sum
 
+# Windows resources generated at build time from internal/trayapp/assets/icon.ico
+*.syso
+cmd/*/winres/icon.ico
+
 # Local config with secrets (never commit)
 config.json
 config.local.json

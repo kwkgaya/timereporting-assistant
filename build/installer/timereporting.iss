@@ -31,6 +31,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+; Icon for the setup wizard, and for the Apps & Features / Add-Remove entry.
+SetupIconFile=..\..\internal\trayapp\assets\icon.ico
+UninstallDisplayIcon={app}\icon.ico
 ; Never prompt to close running processes — kill them automatically.
 CloseApplications=force
 RestartApplications=no
@@ -38,14 +41,15 @@ RestartApplications=no
 [Files]
 Source: "{#DistDir}\timeporting.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DistDir}\tray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#DistDir}\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DistDir}\config.example.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DistDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Comment: "Review and submit your time reports"
-Name: "{group}\Timereporting Tray"; Filename: "{app}\tray.exe"; Comment: "System-tray companion (also starts automatically at login)"
+Name: "{group}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; IconFilename: "{app}\icon.ico"; Comment: "Review and submit your time reports"
+Name: "{group}\Timereporting Tray"; Filename: "{app}\tray.exe"; IconFilename: "{app}\icon.ico"; Comment: "System-tray companion (also starts automatically at login)"
 Name: "{group}\Uninstall Timereporting Assistant"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; Tasks: desktopicon
+Name: "{userdesktop}\Timereporting Assistant"; Filename: "{app}\timeporting.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
