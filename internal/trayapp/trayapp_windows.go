@@ -134,6 +134,8 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 	if s.LastRemindedDate == today {
 		return
 	}
+	// The server must be running to count incomplete days.
+	ensureServerRunning(cfg)
 	count := countIncompleteDays(cfg)
 	if count <= 0 {
 		return
