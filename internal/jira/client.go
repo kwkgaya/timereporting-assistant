@@ -327,6 +327,7 @@ func (c *Client) AddWorklog(key string, minutes int, started time.Time, comment 
 	}
 	startedBack, _ := time.Parse(jiraTimeLayout, w.Started)
 	return model.Worklog{
+		ID:       w.ID,
 		IssueKey: key,
 		Minutes:  w.TimeSpentSeconds / 60,
 		Comment:  adf.Text(w.Comment),
