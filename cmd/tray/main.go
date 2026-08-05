@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/kwkgaya/timereporting-assistant/internal/applog"
@@ -22,7 +23,22 @@ var version = "dev"
 func main() {
 	cfgPath := flag.String("config", config.DefaultPath(), "path to config JSON file")
 	autoStartFlag := flag.String("autostart", "", "register|unregister autostart")
+	openReportFlag := flag.Bool("open-report", false, "internal: relay a timereporting:// protocol activation to the running tray")
 	flag.Parse()
+
+	if *openReportFlag {
+		// Invoked as the timereporting:// protocol handler; the launched URI
+		// is the trailing positional argument. This process's only job is to
+		// signal the already-running tray and exit — see trayapp.SignalOpenReport.
+		path := ""
+		if args := flag.Args(); len(args) > 0 {
+			if u, err := url.Parse(args[0]); err == nil {
+				path = u.Query().Get("path")
+			}
+		}
+		trayapp.SignalOpenReport(path)
+		return
+	}
 
 	if *autoStartFlag != "" {
 		switch *autoStartFlag {

@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.34.0-beta.3] — 2026-08-05
+### Fixed
+- Clicking the reminder toast opened the system browser instead of the app's own window ([#97](https://github.com/kwkgaya/timereporting-assistant/issues/97)). The toast used a bare `http://` launch target, which Windows hands to the default browser; it now protocol-activates a dedicated `timereporting://` handler that relays the click back to the running tray, which opens the embedded window like "Open time report" does
+- A black console window briefly flashed whenever a toast was shown (reminder, credential error, or the beta "Test reminder toast" button) ([#98](https://github.com/kwkgaya/timereporting-assistant/issues/98)). The PowerShell process used to display the toast was missing `CREATE_NO_WINDOW`, unlike every other background process this app spawns
+
 ## [0.34.0-beta.2] — 2026-08-05
 ### Fixed
 - The reminder toast's hero banner and logo were blurry — both were stretched up from the 32×32 tray icon. They now use a dedicated 256×256 render of the same icon

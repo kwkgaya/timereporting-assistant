@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +82,7 @@ func onReady(version, cfgPath string) {
 	systray.SetTitle("Time Reporting")
 	systray.SetTooltip("Time Reporting Assistant " + version)
 	setIcon()
+	registerProtocolHandler()
 
 	cfg, _ := config.Load(cfgPath)
 	if cfg.WebPort == 0 {
@@ -124,6 +126,14 @@ func onReady(version, cfgPath string) {
 		checkAndRemind(cfg, loadState(), today)
 	})
 
+	// Clicking the reminder toast relaunches this exe (via the timereporting://
+	// protocol) rather than talking to this process directly, so it signals
+	// this running instance through a named event instead.
+	go watchForOpenReportSignal(func(path string) {
+		url := fmt.Sprintf("http://localhost:%d%s", cfg.WebPort, path)
+		openAppWindow("Time Reporting Assistant", url, func() error { return ensureServerRunning(cfg) })
+	})
+
 	// Auto-update check shortly after startup (if enabled and this is a
 	// released build).
 	go func() {
@@ -146,7 +156,7 @@ func onReady(version, cfgPath string) {
 		case <-mTestReminder.ClickedCh:
 			// Fires the toast directly, bypassing the incomplete-day count and
 			// once-per-day gate, so it always shows for previewing.
-			go showReminderToast("⏰ Time reporting reminder", "Test toast — you have 3 incomplete day(s). Click to review.", webURL)
+			go showReminderToast("⏰ Time reporting reminder", "Test toast — you have 3 incomplete day(s). Click to review.", "")
 		case <-mAutoStart.ClickedCh:
 			if mAutoStart.Checked() {
 				_ = UnregisterAutoStart()
@@ -175,7 +185,7 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 
 	// Check for a credential error first; warn even when count is zero.
 	if credErr := fetchCredentialError(cfg); credErr != "" {
-		showReminderToast("⚠️ Jira credentials error", credErr+" — open Settings to fix it.", fmt.Sprintf("http://localhost:%d/settings", cfg.WebPort))
+		showReminderToast("⚠️ Jira credentials error", credErr+" — open Settings to fix it.", "/settings")
 		s.LastRemindedDate = today
 		saveState(s)
 		return
@@ -186,7 +196,7 @@ func checkAndRemind(cfg config.Config, s state, today string) {
 		return
 	}
 	msg := fmt.Sprintf("You have %d incomplete day(s). Click to review.", count)
-	showReminderToast("⏰ Time reporting reminder", msg, fmt.Sprintf("http://localhost:%d", cfg.WebPort))
+	showReminderToast("⏰ Time reporting reminder", msg, "")
 	s.LastRemindedDate = today
 	saveState(s)
 }
@@ -460,6 +470,111 @@ func saveState(s state) {
 	_ = os.WriteFile(path, data, 0o600)
 }
 
+// ── Toast click → app window ─────────────────────────────────────────────────
+//
+// A toast can only "protocol activate" a registered URI scheme; a bare
+// http:// launch target is handed to the default browser instead of this app
+// (#97). So toasts launch "timereporting://open-report[?path=...]", which
+// registerProtocolHandler maps to relaunching this exe with --open-report.
+// That short-lived second process can't reach into the already-running tray
+// directly, so it hands off the request via a named event plus a small file
+// carrying the target path, and watchForOpenReportSignal (running in the
+// original process) picks it up and opens the app window.
+
+const (
+	openReportEventName = `Local\TimereportingAssistantOpenReport`
+	openReportProtocol  = "timereporting"
+)
+
+// registerProtocolHandler registers the timereporting:// URI scheme (per-user,
+// no admin) to relaunch this exe with --open-report. Best-effort: failures are
+// silently ignored and simply leave toast clicks non-functional.
+func registerProtocolHandler() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	base, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\`+openReportProtocol, registry.SET_VALUE)
+	if err != nil {
+		return
+	}
+	defer base.Close()
+	_ = base.SetStringValue("", "URL:Time Reporting Assistant")
+	_ = base.SetStringValue("URL Protocol", "")
+
+	cmdKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\`+openReportProtocol+`\shell\open\command`, registry.SET_VALUE)
+	if err != nil {
+		return
+	}
+	defer cmdKey.Close()
+	_ = cmdKey.SetStringValue("", fmt.Sprintf(`"%s" --open-report "%%1"`, exe))
+}
+
+// openReportLaunchURI builds the toast's protocol-activation launch target
+// for the given app-relative path (e.g. "" or "/settings").
+func openReportLaunchURI(path string) string {
+	u := openReportProtocol + "://open-report"
+	if path != "" {
+		u += "?path=" + url.QueryEscape(path)
+	}
+	return u
+}
+
+// openRequestFilePath is where a --open-report process leaves the requested
+// path for the running tray to pick up; the named event carries no payload.
+func openRequestFilePath() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, stateDir, "open-request.txt")
+}
+
+// SignalOpenReport asks a running tray instance to open the report window at
+// path (e.g. "" or "/settings"). Called by the short-lived process launched
+// via protocol activation; a no-op if no tray instance is there to receive it.
+func SignalOpenReport(path string) {
+	_ = os.MkdirAll(filepath.Dir(openRequestFilePath()), 0o755)
+	_ = os.WriteFile(openRequestFilePath(), []byte(path), 0o600)
+
+	name, err := syscall.UTF16PtrFromString(openReportEventName)
+	if err != nil {
+		return
+	}
+	h, _, _ := procCreateEvent.Call(0, 0, 0, uintptr(unsafe.Pointer(name)))
+	if h == 0 {
+		return
+	}
+	defer procCloseHandle.Call(h)
+	procSetEvent.Call(h)
+}
+
+// watchForOpenReportSignal blocks waiting on the named event set by
+// SignalOpenReport, invoking onOpen with the requested path each time.
+func watchForOpenReportSignal(onOpen func(path string)) {
+	name, err := syscall.UTF16PtrFromString(openReportEventName)
+	if err != nil {
+		return
+	}
+	h, _, _ := procCreateEvent.Call(0, 0, 0, uintptr(unsafe.Pointer(name)))
+	if h == 0 {
+		return
+	}
+	const infinite = 0xFFFFFFFF
+	for {
+		r, _, _ := procWaitForSingleObject.Call(h, infinite)
+		if r != 0 {
+			continue
+		}
+		path := ""
+		if data, err := os.ReadFile(openRequestFilePath()); err == nil {
+			path = string(data)
+		}
+		_ = os.Remove(openRequestFilePath())
+		onOpen(path)
+	}
+}
+
 // ── Toast notifications ──────────────────────────────────────────────────────
 
 // toastImageFile writes the embedded app logo to a stable cache-dir path once
@@ -496,7 +611,8 @@ func toastImageFile() string {
 // plain two-line toast, scenario="urgent" breaks through Focus Assist/Do Not
 // Disturb (Windows 11+) and keeps it on screen until dismissed, and it plays
 // a looping reminder sound. Two action buttons: "Review now" and "Dismiss".
-func showReminderToast(title, message, url string) {
+// path is the app-relative page to open on click (e.g. "" or "/settings").
+func showReminderToast(title, message, path string) {
 	sanitise := func(s string) string {
 		s = strings.ReplaceAll(s, `"`, `'`)
 		s = strings.ReplaceAll(s, "`", "'")
@@ -504,7 +620,7 @@ func showReminderToast(title, message, url string) {
 	}
 	title = sanitise(title)
 	message = sanitise(message)
-	url = sanitise(url)
+	launch := sanitise(openReportLaunchURI(path))
 
 	images := ""
 	if imgPath := toastImageFile(); imgPath != "" {
@@ -537,9 +653,10 @@ $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Time Reporting Assistant").Show($toast)
-`, url, title, message, images, url)
+`, launch, title, message, images, launch)
 
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
 }
 
@@ -574,6 +691,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 `, url, title, message)
 
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
 }
 
@@ -609,9 +727,13 @@ var (
 	procAttachThreadInpt = user32.NewProc("AttachThreadInput")
 	procSetActiveWindow  = user32.NewProc("SetActiveWindow")
 
-	kernel32            = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutex     = kernel32.NewProc("CreateMutexW")
-	procCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
+	kernel32                = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutex         = kernel32.NewProc("CreateMutexW")
+	procCurrentThreadID     = kernel32.NewProc("GetCurrentThreadId")
+	procCreateEvent         = kernel32.NewProc("CreateEventW")
+	procSetEvent            = kernel32.NewProc("SetEvent")
+	procWaitForSingleObject = kernel32.NewProc("WaitForSingleObject")
+	procCloseHandle         = kernel32.NewProc("CloseHandle")
 )
 
 const (

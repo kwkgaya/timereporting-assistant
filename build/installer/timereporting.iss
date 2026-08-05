@@ -62,6 +62,18 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueData: """{app}\tray.exe"""; \
   Tasks: autostart; Flags: uninsdeletevalue
 
+; timereporting:// protocol handler, so reminder toast clicks reopen the app
+; window (via tray.exe --open-report) instead of falling back to the browser.
+; The tray app also self-registers this at every startup; declaring it here
+; too keeps it in place across silent updates and cleans it up on uninstall.
+Root: HKCU; Subkey: "Software\Classes\timereporting"; \
+  ValueType: string; ValueName: ""; ValueData: "URL:Time Reporting Assistant"; \
+  Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\timereporting"; \
+  ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\timereporting\shell\open\command"; \
+  ValueType: string; ValueName: ""; ValueData: """{app}\tray.exe"" --open-report ""%1"""
+
 [Run]
 ; Always (re)start the tray companion after install — including SILENT
 ; auto-updates, so the app comes back automatically after updating.
