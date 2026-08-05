@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kwkgaya/timereporting-assistant/internal/jirakey"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,11 +27,9 @@ func makeGHServer() *httptest.Server {
 			"title":      "feat: EDB-100 add widget",
 			"updated_at": "2026-06-03T10:00:00Z",
 			"created_at": "2026-06-03T09:00:00Z",
-			"head":       map[string]any{"ref": "EDB-100-add-widget"},
-		}
-		if strings.Contains(q, "commenter:") {
-			// #99: comment search must only keep results that are PRs.
-			item["pull_request"] = map[string]any{}
+			// #100: search/issues never returns "head" for real; the branch
+			// name is fetched separately via pull_request.url (see below).
+			"pull_request": map[string]any{"url": "http://" + r.Host + "/repos/org/repo/pulls/42"},
 		}
 		var items []map[string]any
 		if q != "" {
@@ -38,6 +38,11 @@ func makeGHServer() *httptest.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_count": len(items),
 			"items":       items,
+		})
+	})
+	mux.HandleFunc("/repos/org/repo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"head": map[string]any{"ref": "task/EDB-100-add-widget"},
 		})
 	})
 	return httptest.NewServer(mux)
@@ -64,6 +69,9 @@ func TestGitHubCollector_CollectForDay(t *testing.T) {
 			sawComment = true
 		default:
 			t.Errorf("unexpected source %q", a.Source)
+		}
+		if !strings.HasPrefix(a.Ref, "task/EDB-100-add-widget ") {
+			t.Errorf("expected Ref to carry the PR's head branch name; got %q", a.Ref)
 		}
 	}
 	if !sawComment {
@@ -95,6 +103,48 @@ func TestGitHubCollector_searchComments_SkipsNonPRIssues(t *testing.T) {
 	}
 	if len(acts) != 0 {
 		t.Errorf("expected non-PR issue comment to be skipped; got %+v", acts)
+	}
+}
+
+// #100: a merged PR reviewed by the user must still resolve its head branch
+// (fetched separately, since /search/issues omits "head"), including when the
+// Jira key in the branch name is lowercase.
+func TestGitHubCollector_searchReviews_MergedPRLowercaseBranch(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/search/issues", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 1,
+			"items": []map[string]any{{
+				"html_url":     "https://github.com/org/repo/pull/77",
+				"title":        "Fix login bug",
+				"updated_at":   "2026-06-03T10:00:00Z",
+				"pull_request": map[string]any{"url": "http://" + r.Host + "/repos/org/repo/pulls/77"},
+			}},
+		})
+	})
+	mux.HandleFunc("/repos/org/repo/pulls/77", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			// merged PR, branch already deleted server-side, but GitHub still
+			// reports the branch name it had.
+			"head":      map[string]any{"ref": "task/edb-777-fix-login"},
+			"merged":    true,
+			"merged_at": "2026-06-03T10:00:00Z",
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	c := NewGitHubCollector(ts.URL, "testuser", "")
+	acts, err := c.searchReviews("2026-06-03")
+	if err != nil {
+		t.Fatalf("searchReviews: %v", err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("expected one review activity; got %+v", acts)
+	}
+	keys := jirakey.Extract(acts[0].Text + " " + acts[0].Ref)
+	if len(keys) != 1 || keys[0] != "EDB-777" {
+		t.Errorf("expected EDB-777 extracted case-insensitively from branch; got %v (ref=%q)", keys, acts[0].Ref)
 	}
 }
 

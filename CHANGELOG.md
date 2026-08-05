@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.35.0-beta.2] — 2026-08-05
+### Fixed
+- PR reviews, comments, and authored PRs whose only Jira key was in the source branch name (not the title) were silently dropped ([#100](https://github.com/kwkgaya/timereporting-assistant/issues/100)). The `/search/issues` API never returns the branch name, so it's now fetched from the PR's own API URL instead. Covers merged PRs too, whose branch may already be deleted, and matches the branch's Jira key case-insensitively
+
 ## [0.35.0-beta.1] — 2026-08-05
 ### Added
 - GitHub activity detection now picks up plain PR comments, not just formal review submissions ([#99](https://github.com/kwkgaya/timereporting-assistant/issues/99)). Previously, days where the only GitHub activity was commenting on a teammate's PR (without submitting an Approve/Request changes/Comment review) showed up as having no activity

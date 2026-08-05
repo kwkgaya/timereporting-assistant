@@ -64,7 +64,13 @@ func NewGitHubCollector(apiBase, username, token string) *GitHubCollector {
 }
 
 func (g *GitHubCollector) get(path string, out any) error {
-	req, err := http.NewRequest(http.MethodGet, g.apiBase+path, nil)
+	return g.getAbs(g.apiBase+path, out)
+}
+
+// getAbs is like get but takes a full URL, needed for endpoints (e.g. a PR's
+// own API URL) returned by an earlier response rather than built from apiBase.
+func (g *GitHubCollector) getAbs(fullURL string, out any) error {
+	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
 		return err
 	}
@@ -80,9 +86,29 @@ func (g *GitHubCollector) get(path string, out any) error {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("github GET %s: %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("github GET %s: %d: %s", fullURL, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return json.Unmarshal(body, out)
+}
+
+// headRef fetches the source branch name of a PR via its API URL. The
+// /search/issues endpoint (used by searchPRs/searchReviews/searchComments)
+// never includes "head", regardless of whether the PR is open or merged, so
+// the branch name — where the Jira key usually lives — must be fetched
+// separately from the PR's own API URL.
+func (g *GitHubCollector) headRef(prAPIURL string) string {
+	if prAPIURL == "" {
+		return ""
+	}
+	var pr struct {
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := g.getAbs(prAPIURL, &pr); err != nil {
+		return ""
+	}
+	return pr.Head.Ref
 }
 
 // CollectForDay returns the user's GitHub activity on a specific UTC day.
@@ -107,13 +133,29 @@ func (g *GitHubCollector) CollectForDay(day time.Time) ([]model.Activity, error)
 	return dedupe(acts), nil
 }
 
-type prItem struct {
-	HTMLURL string `json:"html_url"`
-	Title   string `json:"title"`
-	Head    struct {
-		Ref string `json:"ref"`
-	} `json:"head"`
-	CreatedAt string `json:"created_at"`
+// searchItem is the shape shared by every /search/issues result we consume.
+// PullRequest is only present when the result is a PR (not a plain issue).
+type searchItem struct {
+	HTMLURL     string `json:"html_url"`
+	Title       string `json:"title"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	PullRequest *struct {
+		URL string `json:"url"`
+	} `json:"pull_request"`
+}
+
+// ref builds the Ref string for an activity from a search item: the PR's
+// source branch name (fetched separately, see headRef) followed by its URL.
+// The branch name is where callers' Jira-key convention usually puts the key.
+func (g *GitHubCollector) ref(item searchItem) string {
+	if item.PullRequest == nil {
+		return item.HTMLURL
+	}
+	if head := g.headRef(item.PullRequest.URL); head != "" {
+		return head + " " + item.HTMLURL
+	}
+	return item.HTMLURL
 }
 
 func (g *GitHubCollector) searchPRs(query string) ([]model.Activity, error) {
@@ -122,7 +164,7 @@ func (g *GitHubCollector) searchPRs(query string) ([]model.Activity, error) {
 	q.Set("per_page", "100")
 	q.Set("type", "pr")
 	var result struct {
-		Items []prItem `json:"items"`
+		Items []searchItem `json:"items"`
 	}
 	if err := g.get("/search/issues?"+q.Encode(), &result); err != nil {
 		return nil, err
@@ -134,23 +176,22 @@ func (g *GitHubCollector) searchPRs(query string) ([]model.Activity, error) {
 			Date:   model.Day(t),
 			Source: SourceGitHubPR,
 			Text:   pr.Title,
-			Ref:    pr.Head.Ref + " " + pr.HTMLURL,
+			Ref:    g.ref(pr),
 		})
 	}
 	return acts, nil
 }
 
+// searchReviews finds PRs the user submitted a formal review on (approve,
+// request changes, or review comment) for dayStr. Covers both open and
+// merged PRs — GitHub does not restrict reviewed-by to any PR state.
 func (g *GitHubCollector) searchReviews(dayStr string) ([]model.Activity, error) {
 	q := url.Values{}
 	q.Set("q", fmt.Sprintf("reviewed-by:%s updated:%s", g.username, dayStr))
 	q.Set("per_page", "100")
 	q.Set("type", "pr")
 	var result struct {
-		Items []struct {
-			HTMLURL   string `json:"html_url"`
-			Title     string `json:"title"`
-			UpdatedAt string `json:"updated_at"`
-		} `json:"items"`
+		Items []searchItem `json:"items"`
 	}
 	if err := g.get("/search/issues?"+q.Encode(), &result); err != nil {
 		return nil, err
@@ -162,7 +203,7 @@ func (g *GitHubCollector) searchReviews(dayStr string) ([]model.Activity, error)
 			Date:   model.Day(t),
 			Source: SourceGitHubReview,
 			Text:   "Review: " + pr.Title,
-			Ref:    pr.HTMLURL,
+			Ref:    g.ref(pr),
 		})
 	}
 	return acts, nil
@@ -176,19 +217,14 @@ func (g *GitHubCollector) searchComments(dayStr string) ([]model.Activity, error
 	q.Set("q", fmt.Sprintf("commenter:%s updated:%s", g.username, dayStr))
 	q.Set("per_page", "100")
 	var result struct {
-		Items []struct {
-			HTMLURL   string    `json:"html_url"`
-			Title     string    `json:"title"`
-			UpdatedAt string    `json:"updated_at"`
-			PR        *struct{} `json:"pull_request"` // present only for PRs, not plain issues
-		} `json:"items"`
+		Items []searchItem `json:"items"`
 	}
 	if err := g.get("/search/issues?"+q.Encode(), &result); err != nil {
 		return nil, err
 	}
 	var acts []model.Activity
 	for _, item := range result.Items {
-		if item.PR == nil {
+		if item.PullRequest == nil {
 			continue // plain issue comment, not a PR — not relevant here
 		}
 		t, _ := time.Parse(time.RFC3339, item.UpdatedAt)
@@ -196,7 +232,7 @@ func (g *GitHubCollector) searchComments(dayStr string) ([]model.Activity, error
 			Date:   model.Day(t),
 			Source: SourceGitHubComment,
 			Text:   "Comment: " + item.Title,
-			Ref:    item.HTMLURL,
+			Ref:    g.ref(item),
 		})
 	}
 	return acts, nil
