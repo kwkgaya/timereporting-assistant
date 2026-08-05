@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.35.0-beta.1] — 2026-08-05
+### Added
+- GitHub activity detection now picks up plain PR comments, not just formal review submissions ([#99](https://github.com/kwkgaya/timereporting-assistant/issues/99)). Previously, days where the only GitHub activity was commenting on a teammate's PR (without submitting an Approve/Request changes/Comment review) showed up as having no activity
+
 ## [0.34.0-beta.3] — 2026-08-05
 ### Fixed
 - Clicking the reminder toast opened the system browser instead of the app's own window ([#97](https://github.com/kwkgaya/timereporting-assistant/issues/97)). The toast used a bare `http://` launch target, which Windows hands to the default browser; it now protocol-activates a dedicated `timereporting://` handler that relays the click back to the running tray, which opens the embedded window like "Open time report" does

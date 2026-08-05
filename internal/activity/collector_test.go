@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,17 +20,20 @@ func makeGHServer() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/search/issues", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
+		item := map[string]any{
+			"html_url":   "https://github.com/org/repo/pull/42",
+			"title":      "feat: EDB-100 add widget",
+			"updated_at": "2026-06-03T10:00:00Z",
+			"created_at": "2026-06-03T09:00:00Z",
+			"head":       map[string]any{"ref": "EDB-100-add-widget"},
+		}
+		if strings.Contains(q, "commenter:") {
+			// #99: comment search must only keep results that are PRs.
+			item["pull_request"] = map[string]any{}
+		}
 		var items []map[string]any
 		if q != "" {
-			items = []map[string]any{
-				{
-					"html_url":   "https://github.com/org/repo/pull/42",
-					"title":      "feat: EDB-100 add widget",
-					"updated_at": "2026-06-03T10:00:00Z",
-					"created_at": "2026-06-03T09:00:00Z",
-					"head":       map[string]any{"ref": "EDB-100-add-widget"},
-				},
-			}
+			items = []map[string]any{item}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_count": len(items),
@@ -52,10 +56,45 @@ func TestGitHubCollector_CollectForDay(t *testing.T) {
 	if len(acts) == 0 {
 		t.Fatal("expected at least one activity from mock GitHub")
 	}
+	sawComment := false
 	for _, a := range acts {
-		if a.Source != SourceGitHubPR && a.Source != SourceGitHubReview {
+		switch a.Source {
+		case SourceGitHubPR, SourceGitHubReview:
+		case SourceGitHubComment:
+			sawComment = true
+		default:
 			t.Errorf("unexpected source %q", a.Source)
 		}
+	}
+	if !sawComment {
+		t.Errorf("expected a %s activity; got %+v", SourceGitHubComment, acts)
+	}
+}
+
+// #99: a comment left on a plain issue (no "pull_request" field) must not be
+// surfaced as PR activity.
+func TestGitHubCollector_searchComments_SkipsNonPRIssues(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/search/issues", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 1,
+			"items": []map[string]any{{
+				"html_url":   "https://github.com/org/repo/issues/7",
+				"title":      "EDB-300 question about setup",
+				"updated_at": "2026-06-03T10:00:00Z",
+			}},
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	c := NewGitHubCollector(ts.URL, "testuser", "")
+	acts, err := c.searchComments("2026-06-03")
+	if err != nil {
+		t.Fatalf("searchComments: %v", err)
+	}
+	if len(acts) != 0 {
+		t.Errorf("expected non-PR issue comment to be skipped; got %+v", acts)
 	}
 }
 

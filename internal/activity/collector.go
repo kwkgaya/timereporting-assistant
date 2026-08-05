@@ -38,6 +38,7 @@ const (
 	SourceGitHubCommit   = "github-commit"
 	SourceGitHubPR       = "github-pr"
 	SourceGitHubReview   = "github-review"
+	SourceGitHubComment  = "github-comment" // #99: PR/issue comments, distinct from formal reviews
 	SourceLocalGit       = "local-git"
 	SourceLocalGitReflog = "local-git-reflog" // #16: commits only in reflog
 )
@@ -100,6 +101,9 @@ func (g *GitHubCollector) CollectForDay(day time.Time) ([]model.Activity, error)
 	if reviews, err := g.searchReviews(dayStr); err == nil {
 		acts = append(acts, reviews...)
 	}
+	if comments, err := g.searchComments(dayStr); err == nil {
+		acts = append(acts, comments...)
+	}
 	return dedupe(acts), nil
 }
 
@@ -159,6 +163,40 @@ func (g *GitHubCollector) searchReviews(dayStr string) ([]model.Activity, error)
 			Source: SourceGitHubReview,
 			Text:   "Review: " + pr.Title,
 			Ref:    pr.HTMLURL,
+		})
+	}
+	return acts, nil
+}
+
+// searchComments finds PRs/issues the user left a plain comment on for dayStr.
+// This catches conversation comments that aren't submitted as a formal review
+// (approve/request-changes/comment), which searchReviews misses (#99).
+func (g *GitHubCollector) searchComments(dayStr string) ([]model.Activity, error) {
+	q := url.Values{}
+	q.Set("q", fmt.Sprintf("commenter:%s updated:%s", g.username, dayStr))
+	q.Set("per_page", "100")
+	var result struct {
+		Items []struct {
+			HTMLURL   string    `json:"html_url"`
+			Title     string    `json:"title"`
+			UpdatedAt string    `json:"updated_at"`
+			PR        *struct{} `json:"pull_request"` // present only for PRs, not plain issues
+		} `json:"items"`
+	}
+	if err := g.get("/search/issues?"+q.Encode(), &result); err != nil {
+		return nil, err
+	}
+	var acts []model.Activity
+	for _, item := range result.Items {
+		if item.PR == nil {
+			continue // plain issue comment, not a PR — not relevant here
+		}
+		t, _ := time.Parse(time.RFC3339, item.UpdatedAt)
+		acts = append(acts, model.Activity{
+			Date:   model.Day(t),
+			Source: SourceGitHubComment,
+			Text:   "Comment: " + item.Title,
+			Ref:    item.HTMLURL,
 		})
 	}
 	return acts, nil
