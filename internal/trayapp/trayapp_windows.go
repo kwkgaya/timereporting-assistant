@@ -36,6 +36,9 @@ import (
 //go:embed assets/icon.ico
 var appIconPNG []byte
 
+//go:embed assets/icon.png
+var toastLogoPNG []byte
+
 const (
 	autoStartKey  = `Software\Microsoft\Windows\CurrentVersion\Run`
 	autoStartName = "TimereportingAssistant"
@@ -106,6 +109,10 @@ func onReady(version, cfgPath string) {
 	mAutoStart := systray.AddMenuItemCheckbox("Start at login", "Toggle auto-start at Windows login", isAutoStartRegistered())
 	mVersion := systray.AddMenuItem("Version: "+version, "")
 	mVersion.Disable()
+	mTestReminder := systray.AddMenuItem("Test reminder toast", "Preview the daily reminder toast")
+	if !isBetaVersion(version) {
+		mTestReminder.Hide()
+	}
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit Time Reporting Assistant tray")
 
@@ -136,6 +143,10 @@ func onReady(version, cfgPath string) {
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
 			go checkForUpdates(cfg, version, true)
+		case <-mTestReminder.ClickedCh:
+			// Fires the toast directly, bypassing the incomplete-day count and
+			// once-per-day gate, so it always shows for previewing.
+			go showReminderToast("⏰ Time reporting reminder", "Test toast — you have 3 incomplete day(s). Click to review.", webURL)
 		case <-mAutoStart.ClickedCh:
 			if mAutoStart.Checked() {
 				_ = UnregisterAutoStart()
@@ -451,9 +462,40 @@ func saveState(s state) {
 
 // ── Toast notifications ──────────────────────────────────────────────────────
 
-// showReminderToast shows a prominent Windows toast for the daily reminder.
-// It uses scenario="reminder" (stays on screen longer, plays reminder sound)
-// with two action buttons: "Review now" and "Remind me later".
+// toastImageFile writes the embedded app logo to a stable cache-dir path once
+// and returns its path, for use as the toast's hero/logo image. The file is
+// kept (not deleted) because the toast is rendered asynchronously by a
+// detached powershell process, well after this function returns. Returns ""
+// — and the toast falls back to text-only — if the write fails.
+var (
+	toastImageOnce sync.Once
+	toastImagePath string
+)
+
+func toastImageFile() string {
+	toastImageOnce.Do(func() {
+		dir, err := os.UserCacheDir()
+		if err != nil {
+			dir = os.TempDir()
+		}
+		dir = filepath.Join(dir, stateDir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return
+		}
+		path := filepath.Join(dir, "toast-logo.png")
+		if err := os.WriteFile(path, toastLogoPNG, 0o644); err != nil {
+			return
+		}
+		toastImagePath = path
+	})
+	return toastImagePath
+}
+
+// showReminderToast shows a large, hard-to-miss Windows toast for the daily
+// reminder: a hero banner and big logo make it visually much bigger than a
+// plain two-line toast, scenario="urgent" breaks through Focus Assist/Do Not
+// Disturb (Windows 11+) and keeps it on screen until dismissed, and it plays
+// a looping reminder sound. Two action buttons: "Review now" and "Dismiss".
 func showReminderToast(title, message, url string) {
 	sanitise := func(s string) string {
 		s = strings.ReplaceAll(s, `"`, `'`)
@@ -464,16 +506,25 @@ func showReminderToast(title, message, url string) {
 	message = sanitise(message)
 	url = sanitise(url)
 
+	images := ""
+	if imgPath := toastImageFile(); imgPath != "" {
+		imgURI := "file:///" + strings.ReplaceAll(imgPath, `\`, "/")
+		images = fmt.Sprintf(`
+      <image placement="hero" src="%s"/>
+      <image placement="appLogoOverride" hint-crop="none" src="%s"/>`, imgURI, imgURI)
+	}
+
 	ps := fmt.Sprintf(`
 Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null
 $template = @"
-<toast scenario="reminder" duration="long" activationType="protocol" launch="%s">
+<toast scenario="urgent" duration="long" activationType="protocol" launch="%s">
   <visual>
     <binding template="ToastGeneric">
-      <text hint-style="title">%s</text>
-      <text hint-wrap="true">%s</text>
+      <text hint-style="title" hint-wrap="true">%s</text>
+      <text hint-style="body" hint-wrap="true">%s</text>
+      <text hint-style="captionSubtle" hint-wrap="true">Stays on screen until you review it.</text>%s
     </binding>
   </visual>
   <actions>
@@ -486,7 +537,7 @@ $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Time Reporting Assistant").Show($toast)
-`, url, title, message, url)
+`, url, title, message, images, url)
 
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps)
 	_ = cmd.Start()
@@ -792,6 +843,12 @@ func openLogsFolder() {
 	cmd := exec.Command("explorer", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
+}
+
+// isBetaVersion reports whether version is a pre-release build (e.g.
+// "v0.33.0-beta.1"), used to gate dev-only tray menu items.
+func isBetaVersion(version string) bool {
+	return strings.Contains(strings.ToLower(version), "beta")
 }
 
 // maybeAutoUpdate runs an update check on startup when auto-update is enabled

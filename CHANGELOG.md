@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.34.0-beta.1] — 2026-08-05
+### Added
+- The daily reminder toast (and the Jira credential-error toast) is now much bigger and harder to miss: a hero banner and large logo, plus `scenario="urgent"`, which breaks through Focus Assist/Do Not Disturb on Windows 11 and keeps the toast on screen until it's dismissed
+- Beta builds only: a "Test reminder toast" tray menu item that fires the reminder toast immediately, for previewing without waiting for the idle/unlock cycle
+
 ## [0.33.0-beta.1] — 2026-08-03
 ### Added
 - Cancelled meetings are excluded from the day's time. A calendar entry whose title is a cancellation notice (`Cancelled - …`, `Canceled: …`) or that carries `STATUS:CANCELLED` no longer contributes suggested time. Titles that merely start with the word, such as "Cancelled flights follow-up", are kept — a separator is required. Cancelling a single occurrence of a recurring meeting removes only that day, not the series
