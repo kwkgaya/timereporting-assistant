@@ -36,7 +36,7 @@ import (
 //go:embed assets/icon.ico
 var appIconPNG []byte
 
-//go:embed assets/icon.png
+//go:embed assets/toast-logo.png
 var toastLogoPNG []byte
 
 const (

@@ -31,7 +31,11 @@ func main() {
 	// Write multi-size ICO (32 + 16).
 	must(writeFile("internal/trayapp/assets/icon.ico", buildICO(pngs)))
 
-	println("icon.png and icon.ico written")
+	// Toast hero/logo images are shown far larger than the tray icon; a
+	// dedicated high-res render avoids the blur from upscaling the 32px icon.
+	must(writeFile("internal/trayapp/assets/toast-logo.png", renderIcon(256)))
+
+	println("icon.png, icon.ico and toast-logo.png written")
 }
 
 // renderIcon draws the timereporting-assistant icon at the given square size.

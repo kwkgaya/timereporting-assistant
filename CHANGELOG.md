@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.34.0-beta.2] — 2026-08-05
+### Fixed
+- The reminder toast's hero banner and logo were blurry — both were stretched up from the 32×32 tray icon. They now use a dedicated 256×256 render of the same icon
+
 ## [0.34.0-beta.1] — 2026-08-05
 ### Added
 - The daily reminder toast (and the Jira credential-error toast) is now much bigger and harder to miss: a hero banner and large logo, plus `scenario="urgent"`, which breaks through Focus Assist/Do Not Disturb on Windows 11 and keeps the toast on screen until it's dismissed
