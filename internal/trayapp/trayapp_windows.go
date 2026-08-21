@@ -111,6 +111,10 @@ func onReady(version, cfgPath string) {
 	mAutoStart := systray.AddMenuItemCheckbox("Start at login", "Toggle auto-start at Windows login", isAutoStartRegistered())
 	mVersion := systray.AddMenuItem("Version: "+version, "")
 	mVersion.Disable()
+	mTestReminder := systray.AddMenuItem("Test reminder toast", "Preview the daily reminder toast")
+	if !isBetaVersion(version) {
+		mTestReminder.Hide()
+	}
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit Time Reporting Assistant tray")
 
@@ -149,6 +153,10 @@ func onReady(version, cfgPath string) {
 			openLogsFolder()
 		case <-mUpdate.ClickedCh:
 			go checkForUpdates(cfg, version, true)
+		case <-mTestReminder.ClickedCh:
+			// Fires the toast directly, bypassing the incomplete-day count and
+			// once-per-day gate, so it always shows for previewing.
+			go showReminderToast("⏰ Time reporting reminder", "Test toast — you have 3 incomplete day(s). Click to review.", "")
 		case <-mAutoStart.ClickedCh:
 			if mAutoStart.Checked() {
 				_ = UnregisterAutoStart()
@@ -957,6 +965,12 @@ func openLogsFolder() {
 	cmd := exec.Command("explorer", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	_ = cmd.Start()
+}
+
+// isBetaVersion reports whether version is a pre-release build (e.g.
+// "v0.33.0-beta.1"), used to gate dev-only tray menu items.
+func isBetaVersion(version string) bool {
+	return strings.Contains(strings.ToLower(version), "beta")
 }
 
 // maybeAutoUpdate runs an update check on startup when auto-update is enabled
