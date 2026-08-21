@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.35.3] — 2026-08-21
+### Removed
+- The beta-only "Test reminder toast" tray menu item, which fired the reminder toast immediately for previewing
+
 ## [0.35.0-beta.2] — 2026-08-05
 ### Fixed
 - PR reviews, comments, and authored PRs whose only Jira key was in the source branch name (not the title) were silently dropped ([#100](https://github.com/kwkgaya/timereporting-assistant/issues/100)). The `/search/issues` API never returns the branch name, so it's now fetched from the PR's own API URL instead. Covers merged PRs too, whose branch may already be deleted, and matches the branch's Jira key case-insensitively
