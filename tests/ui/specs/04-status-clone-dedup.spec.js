@@ -63,6 +63,27 @@ test.describe('Clone previous day', () => {
     expect(cloned).toBeTruthy();
     expect(cloned.comment).toBe('Cloned work');
   });
+
+  test('button is hidden once the day is complete, even before it is submitted', async ({ app }) => {
+    await app.waitForFunction(() => typeof renderDetail === 'function');
+
+    // Complete day (Jira time already at target) that was NOT submitted here.
+    await app.evaluate(() => renderDetail({
+      date: '2026-06-03', weekday: 'Wednesday', status: 'working', submitted: false,
+      existing: [{ id: 'x1', issueKey: 'EDB-333', minutes: TARGET_MINS, comment: 'Full day', category: 'existing' }],
+      suggested: [],
+    }));
+    await expect(app.locator('#detail')).toContainText('status locked');
+    expect(await app.locator('#detail button:has-text("Clone previous day")').count()).toBe(0);
+
+    // Same day still short of the target keeps the button.
+    await app.evaluate(() => renderDetail({
+      date: '2026-06-03', weekday: 'Wednesday', status: 'working', submitted: false,
+      existing: [{ id: 'x1', issueKey: 'EDB-333', minutes: 60, comment: 'Partial', category: 'existing' }],
+      suggested: [],
+    }));
+    expect(await app.locator('#detail button:has-text("Clone previous day")').count()).toBe(1);
+  });
 });
 
 test.describe('Meeting deduplication', () => {

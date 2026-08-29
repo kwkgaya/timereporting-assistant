@@ -2984,7 +2984,7 @@ function renderDetail(day) {
     +'</select>'
     +(statusLocked?'<span style="font-size:.78rem;color:#6b778c;margin-left:8px">Day complete — status locked</span>':'')
     +'</label>';
-  if (!day.submitted) {
+  if (!statusLocked) {
     html += '<button onclick="clonePrev(\''+day.date+'\')">Clone previous day</button>';
   }
   html += '</div>';

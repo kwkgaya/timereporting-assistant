@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.35.4] — 2026-08-29
+### Fixed
+- "Clone previous day" was still offered on days that are locked because they are already complete (Jira time at or above the daily target). The button now follows the same rule as the day-status selector and is hidden for submitted *and* fully-logged days
+
 ## [0.35.0-beta.2] — 2026-08-05
 ### Fixed
 - PR reviews, comments, and authored PRs whose only Jira key was in the source branch name (not the title) were silently dropped ([#100](https://github.com/kwkgaya/timereporting-assistant/issues/100)). The `/search/issues` API never returns the branch name, so it's now fetched from the PR's own API URL instead. Covers merged PRs too, whose branch may already be deleted, and matches the branch's Jira key case-insensitively
