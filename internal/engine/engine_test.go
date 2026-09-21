@@ -116,6 +116,38 @@ func TestTopUpExistingWorklogs(t *testing.T) {
 	}
 }
 
+func TestIssueWithExistingWorklogExcludedFromDistribution(t *testing.T) {
+	existing := []model.Worklog{
+		{IssueKey: "EDB-100", Minutes: 120, Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},
+	}
+	acts := []model.Activity{
+		activity("EDB-100 work", "feat/EDB-100"),
+		activity("EDB-200 review", "fix/EDB-200"),
+	}
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, existing, nil, acts)
+
+	for _, w := range plan.Suggested {
+		if w.IssueKey == "EDB-100" {
+			t.Error("EDB-100 already has a worklog and must not be suggested again")
+		}
+	}
+	if sumSuggested(plan) != 300 {
+		t.Errorf("suggested = %d, want 300 (all remaining to EDB-200)", sumSuggested(plan))
+	}
+}
+
+func TestAllActivityIssuesAlreadyLoggedSuggestsNothing(t *testing.T) {
+	existing := []model.Worklog{
+		{IssueKey: "EDB-100", Minutes: 120, Category: model.CategoryExisting, Started: model.WorklogStart(jun1)},
+	}
+	acts := []model.Activity{activity("EDB-100 work", "feat/EDB-100")}
+	plan := BuildDayPlan(testCfg, jun1, model.StatusWorking, existing, nil, acts)
+
+	if len(plan.Suggested) != 0 {
+		t.Errorf("suggested = %d worklog(s), want 0", len(plan.Suggested))
+	}
+}
+
 func TestFullLeaveDay(t *testing.T) {
 	plan := BuildDayPlan(testCfg, jun1, model.StatusFullLeave, nil, makeMeetings(60), nil)
 

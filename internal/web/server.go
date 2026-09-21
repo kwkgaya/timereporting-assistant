@@ -60,6 +60,9 @@ type WlogView struct {
 	Category  string `json:"category"`
 	Author    string `json:"author,omitempty"`
 	Submitted bool   `json:"submitted,omitempty"` // true once individually submitted
+	// Reedit marks a suggested row that came from a logged worklog the user chose
+	// to edit: the worklog was deleted from Jira and must be resubmitted.
+	Reedit bool `json:"reedit,omitempty"`
 	// Source is "real" (read from Jira), "mock" (read/submitted to mock),
 	// or "" for suggested/manual worklogs not yet submitted.
 	Source string `json:"source,omitempty"`
@@ -215,7 +218,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/days/{date}/submit", s.apiSubmitDay)
 	mux.HandleFunc("POST /api/days/{date}/rows/{idx}/submit", s.apiSubmitRow)
 	mux.HandleFunc("POST /api/days/{date}/clone-previous", s.apiClonePrevious)
+	mux.HandleFunc("POST /api/days/{date}/rebuild", s.apiRebuildDay)
 	mux.HandleFunc("PUT /api/days/{date}/existing/{id}", s.apiUpdateExisting)
+	mux.HandleFunc("DELETE /api/days/{date}/existing/{id}", s.apiDeleteExisting)
+	mux.HandleFunc("POST /api/days/{date}/existing/{id}/edit", s.apiEditExisting)
 	mux.HandleFunc("GET /guide/jira-token", s.handleJiraGuide)
 	mux.HandleFunc("GET /guide/github-token", s.handleGitHubGuide)
 	mux.HandleFunc("GET /guide/calendar-url", s.handleCalendarGuide)
@@ -892,46 +898,81 @@ func (s *Server) apiUpdateExisting(w http.ResponseWriter, r *http.Request) {
 // (server only allows deleting worklogs by the configured user).
 func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
 	date, id := r.PathValue("date"), r.PathValue("id")
+	if _, err := s.removeExistingWorklog(date, id); err != nil {
+		writeErr(w, err.status, err.msg)
+		return
+	}
 	s.mu.Lock()
-	idx, ok := s.dayIndex[date]
+	d := s.days[s.dayIndex[date]]
 	s.mu.Unlock()
-	if !ok {
-		writeErr(w, http.StatusNotFound, "date not found: "+date)
+	writeJSON(w, http.StatusOK, d)
+}
+
+// apiEditExisting turns a logged worklog into an editable suggested row: the
+// worklog is deleted from Jira and re-added to Suggested so the user can adjust
+// it and submit again. This keeps the day in a single, unambiguous state.
+func (s *Server) apiEditExisting(w http.ResponseWriter, r *http.Request) {
+	date, id := r.PathValue("date"), r.PathValue("id")
+	removed, err := s.removeExistingWorklog(date, id)
+	if err != nil {
+		writeErr(w, err.status, err.msg)
 		return
 	}
 
-	// Find the worklog and enforce author guard.
+	row := WlogView{
+		IssueKey: removed.IssueKey,
+		Minutes:  removed.Minutes,
+		Comment:  removed.Comment,
+		Category: string(model.CategoryManual),
+		Reedit:   true,
+	}
 	s.mu.Lock()
-	var issueKey, author string
-	for _, wl := range s.days[idx].Existing {
-		if wl.ID == id {
-			issueKey = wl.IssueKey
-			author = wl.Author
-			break
+	idx := s.dayIndex[date]
+	s.days[idx].Suggested = append([]WlogView{row}, s.days[idx].Suggested...)
+	s.days[idx].Submitted = false
+	d := s.days[idx]
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, d)
+}
+
+// httpError carries a status code alongside a message.
+type httpError struct {
+	status int
+	msg    string
+}
+
+// removeExistingWorklog deletes a logged worklog from Jira and drops it from
+// the cached day, returning the removed row.
+func (s *Server) removeExistingWorklog(date, id string) (WlogView, *httpError) {
+	s.mu.Lock()
+	idx, ok := s.dayIndex[date]
+	var found WlogView
+	if ok {
+		for _, wl := range s.days[idx].Existing {
+			if wl.ID == id {
+				found = wl
+				break
+			}
 		}
 	}
 	s.mu.Unlock()
-	if issueKey == "" {
-		writeErr(w, http.StatusNotFound, "worklog "+id+" not found in local state for "+date)
-		return
+	if !ok {
+		return WlogView{}, &httpError{http.StatusNotFound, "date not found: " + date}
 	}
-	if author != "" {
-		// Author is empty in mock (fine); enforce on Jira only when author is known.
-		_ = author // real-Jira guard: let Jira return 403 if the user doesn't own it.
+	if found.IssueKey == "" {
+		return WlogView{}, &httpError{http.StatusNotFound, "worklog " + id + " not found in local state for " + date}
 	}
 
 	s.mu.Lock()
 	client, _, cerr := s.writeClientLocked()
 	s.mu.Unlock()
 	if cerr != nil {
-		writeErr(w, http.StatusBadRequest, cerr.Error())
-		return
+		return WlogView{}, &httpError{http.StatusBadRequest, cerr.Error()}
 	}
-	if err := client.DeleteWorklog(issueKey, id); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	if err := client.DeleteWorklog(found.IssueKey, id); err != nil {
+		return WlogView{}, &httpError{http.StatusInternalServerError, err.Error()}
 	}
-	// Remove from local state.
+
 	s.mu.Lock()
 	existing := s.days[idx].Existing
 	for i, wl := range existing {
@@ -940,9 +981,8 @@ func (s *Server) apiDeleteExisting(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	d := s.days[idx]
 	s.mu.Unlock()
-	writeJSON(w, http.StatusOK, d)
+	return found, nil
 }
 
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
@@ -1022,6 +1062,45 @@ func (s *Server) apiGetDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// apiRebuildDay recomputes the plan for a single day from scratch, discarding
+// the cached suggestions. Existing Jira worklogs are re-read by the builder.
+func (s *Server) apiRebuildDay(w http.ResponseWriter, r *http.Request) {
+	date := r.PathValue("date")
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid date: "+date)
+		return
+	}
+
+	s.mu.Lock()
+	builder := s.dayBuilder
+	cfg := s.cfg
+	s.mu.Unlock()
+	if builder == nil {
+		writeErr(w, http.StatusServiceUnavailable, "day plan builder is not available")
+		return
+	}
+
+	plan, err := builder(cfg, t)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "rebuild day: "+err.Error())
+		return
+	}
+	d := planToView(plan)
+
+	s.mu.Lock()
+	if idx, exists := s.dayIndex[date]; exists {
+		s.days[idx] = d
+	} else {
+		s.dayIndex[date] = len(s.days)
+		s.days = append(s.days, d)
+	}
+	delete(s.pendingDays, date)
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"day": d})
 }
 
 // apiPutDay replaces the Suggested worklogs for a day (user edits).
@@ -2683,10 +2762,12 @@ main{display:grid;grid-template-columns:230px 1fr;height:calc(100vh - 48px)}
 .total-warn{color:#ff5630;font-weight:600}
 /* Detail panel */
 #detail{padding:20px;overflow-y:auto;flex:1}
-.day-nav{display:inline-flex;align-items:center;gap:8px;margin-bottom:12px}
+.day-nav{display:flex;width:100%;align-items:center;gap:8px;margin-bottom:12px}
 .day-nav h2{flex:1;text-align:center;margin:0;font-size:1.3rem}
 .nav-btn{font-size:1.8rem;line-height:1;background:#fff;border:1px solid #dfe1e6;border-radius:8px;padding:6px 22px;cursor:pointer;color:#0052cc}
 .nav-btn:hover{background:#e9f2ff}
+#rebuild-btn{margin-left:auto;font-size:.85rem;padding:7px 12px;color:#0052cc;border-color:#b3d4ff}
+#rebuild-btn:hover{background:#e9f2ff}
 .summary-line{font-size:1rem;font-weight:700;margin:18px 0;padding:10px 0;display:flex;align-items:center;gap:0;flex-wrap:wrap}
 /* Controls */
 .controls{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
@@ -2704,6 +2785,7 @@ th{background:#f4f5f7;font-size:.8rem;font-weight:600}
 td input[type=number]{width:60px;border:1px solid #dfe1e6;border-radius:3px;padding:3px 5px;font:inherit}
 td input[type=text]{width:100%;border:1px solid #dfe1e6;border-radius:3px;padding:3px 5px;font:inherit}
 .cat-existing{background:#e3fcef}
+.row-editing{background:#fff4c2}
 .cat-existing.src-real{background:#e3fcef;border-left:3px solid #00875a}
 .cat-existing.src-mock{background:#fff8e1;border-left:3px solid #ff991f}
 .src-real-badge{font-size:.68rem;font-weight:600;color:#00875a;background:#dcfae8;padding:1px 6px;border-radius:10px;margin-left:6px}
@@ -2971,6 +3053,7 @@ function renderDetail(day) {
     +'<h2 style="margin:0;font-size:1.3rem">'+day.date+' <small style="font-weight:400">'+day.weekday+'</small>'
     +(day.submitted?' <span class="badge-submitted">Submitted</span>':'')+'</h2>'
     +'<button class="nav-btn" onclick="gotoDay(1)" title="Next day">›</button>'
+    +'<button id="rebuild-btn" onclick="rebuildDay(\''+day.date+'\')" title="Discard the current suggestions and build the plan for this day again">↻ Rebuild plan</button>'
     +'</div>';
 
   // Controls — status selector is disabled for submitted or fully-complete days.
@@ -2989,33 +3072,26 @@ function renderDetail(day) {
   }
   html += '</div>';
 
-  // Existing worklogs — read-only by default; click ✏️ to edit time/comment.
+  // Existing worklogs — read-only; ✏️ deletes the worklog and re-opens it as a
+  // suggested row so it can be edited and submitted again.
   if (day.existing && day.existing.length) {
     html += '<strong style="display:block;margin-bottom:8px">Already logged in Jira</strong>';
     html += '<table class="wl-table"><colgroup><col style="width:52px"><col><col style="width:92px"><col></colgroup>';
     html += '<tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th></tr>';
     day.existing.forEach(w => {
       const eid = 'ex-key-'+day.date+'-'+w.id;
-      const editing = editingExisting.has(w.id);
-      html += '<tr class="cat-existing">';
+      html += '<tr class="cat-existing" id="ex-logged-'+w.id+'">';
       // Both buttons packed in one narrow first column
       html += '<td style="white-space:nowrap;width:52px">'
         +'<button class="del-btn" title="Delete" onclick="deleteExisting(\''+day.date+'\',\''+w.id+'\')">✕</button>'
-        +(editing
-          ? '<button class="primary" style="font-size:.75rem;padding:2px 6px;margin-left:2px" onclick="saveExistingEdit(\''+day.date+'\',\''+w.id+'\',\''+w.issueKey+'\')">💾</button>'
-          : '<button style="font-size:.75rem;padding:2px 4px;margin-left:2px;background:transparent;border:none;cursor:pointer" title="Edit" onclick="toggleEditExisting(\''+w.id+'\')">✏️</button>')
+        +'<button style="font-size:.75rem;padding:2px 4px;margin-left:2px;background:transparent;border:none;cursor:pointer" '
+          +'title="Edit — removes the worklog from Jira and moves it to Suggested worklogs for resubmission" '
+          +'onclick="editExisting(\''+day.date+'\',\''+w.id+'\')">✏️</button>'
         +'</td>';
       // Key + title (always read-only)
       html += '<td><input type="text" id="'+eid+'" value="'+esc(w.issueKey)+'" readonly style="width:100%;background:transparent;border:none;font-weight:600;cursor:default" tabindex="-1"></td>';
-      if (editing) {
-        // Edit mode: time and comment are editable inputs
-        html += '<td><input type="text" id="ex-time-'+w.id+'" value="'+hm(w.minutes)+'" style="width:80px" placeholder="1h 30m"></td>';
-        html += '<td><input type="text" id="ex-comment-'+w.id+'" value="'+esc(w.comment)+'" style="width:100%"></td>';
-      } else {
-        // View mode: plain text
-        html += '<td style="white-space:nowrap">'+esc(hm(w.minutes))+'</td>';
-        html += '<td>'+esc(w.comment)+'</td>';
-      }
+      html += '<td style="white-space:nowrap">'+esc(hm(w.minutes))+'</td>';
+      html += '<td>'+esc(w.comment)+'</td>';
       html += '</tr>';
     });
     html += '</table>';
@@ -3025,16 +3101,17 @@ function renderDetail(day) {
 
   // Suggested worklogs — hidden when existing Jira time already reaches the target.
   if (!dayFull) {
-    html += '<strong style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
+    html += '<strong id="sugg-heading" style="display:block;margin-top:20px;margin-bottom:8px">Suggested worklogs</strong>';
     html += '<table id="sugg-table" class="wl-table"><colgroup><col style="width:52px"><col><col style="width:92px"><col><col style="width:72px"></colgroup>';
     html += '<tr><th></th><th>Issue key &amp; title</th><th>Time</th><th>Comment</th><th></th></tr>';
     (day.suggested||[]).forEach((w,i) => {
-      const rowCls = 'cat-'+(w.category||'manual')+(w.issueKey?'':' row-unassigned');
+      const rowCls = (w.reedit ? 'row-editing' : 'cat-'+(w.category||'manual'))+(w.issueKey?'':' row-unassigned');
       const submitted = w.submitted;
       const kid = 'key-'+day.date+'-'+i;
+      const keyLocked = submitted || w.reedit;
       html += '<tr class="'+rowCls+'"'+(submitted?' style="opacity:.55"':'')+' id="row-'+day.date+'-'+i+'">'
         +'<td>'+(submitted?'':'<button class="del-btn" title="Delete" onclick="deleteRow(\''+day.date+'\','+i+')">✕</button>')+'</td>'
-        +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+' onchange="editRowKey(\''+day.date+'\','+i+',this.value)"></td>'
+        +'<td><input type="text" id="'+kid+'" value="'+esc(w.issueKey)+'" style="width:100%" '+(submitted?'disabled':'')+(w.reedit?' readonly title="Issue cannot be changed for a worklog being re-submitted"':'')+' '+(keyLocked?'':'onchange="editRowKey(\''+day.date+'\','+i+',this.value)"')+'></td>'
         +'<td><input type="text" id="time-'+day.date+'-'+i+'" value="'+hm(w.minutes)+'" '+(submitted?'disabled':'')+' style="width:100%" placeholder="1h 30m" title="e.g. 1h, 30m, 1h 30m" onchange="editRowTime(\''+day.date+'\','+i+',this.value)"></td>'
         +'<td><input type="text" id="comment-'+day.date+'-'+i+'" value="'+esc(w.comment)+'" '+(submitted?'disabled':'')+' onchange="editRow(\''+day.date+'\','+i+',\'comment\',this.value)"></td>'
         +'<td>'+(submitted?'<span style="color:#00875a">✓</span>':'<button class="primary" style="font-size:.75rem;padding:3px 8px" onclick="submitRow(\''+day.date+'\','+i+')">Submit</button>')+'</td>'
@@ -3045,7 +3122,7 @@ function renderDetail(day) {
         html += '<tr><td colspan="5" style="color:#6b778c;text-align:center">No suggestions.</td></tr>';
       }
     }
-    if (!day.submitted) {
+    if (!day.submitted && !dayFull) {
       html += '<tr class="new-row"><td></td><td>'
         +'<input type="text" id="new-issue-input" placeholder="+ Type to search Jira issues…" autocomplete="off" '
           +'oninput="onIssueSearchInput(this.value)" onkeydown="onNewRowKey(event,this)" onblur="setTimeout(hideIssueResults,200)">'
@@ -3369,43 +3446,23 @@ function copyRovoPrompt(date) {
   );
 }
 
-// editingExisting tracks which existing-worklog IDs are currently in edit mode.
-const editingExisting = new Set();
-
-function toggleEditExisting(id) {
-  if (editingExisting.has(id)) {
-    editingExisting.delete(id);
-  } else {
-    editingExisting.add(id);
-  }
-  const day = getDayLocal(currentDate);
-  if (day) renderDetail(day);
-}
-
-async function saveExistingEdit(date, id, issueKey) {
-  const timeEl = document.getElementById('ex-time-'+id);
-  const commentEl = document.getElementById('ex-comment-'+id);
-  if (!timeEl || !commentEl) return;
-  const mins = parseDuration(timeEl.value);
-  if (isNaN(mins) || mins <= 0) { toast('Enter time like 1h, 30m, or 1h 30m', true); return; }
-  await updateExisting(date, id, issueKey, mins, commentEl.value);
-  editingExisting.delete(id);
-}
-
-// updateExistingTime parses a Jira-format time string then delegates to updateExisting.
-function updateExistingTime(date, id, issueKey, timeStr, comment) {
-  const mins = parseDuration(timeStr);
-  if (isNaN(mins) || mins <= 0) { toast('Enter time like 1h, 30m, or 1h 30m', true); return; }
-  updateExisting(date, id, issueKey, mins, comment);
-}
-
-async function updateExisting(date, id, issueKey, minutes, comment) {  try {
-    const updated = await api('PUT','/days/'+date+'/existing/'+id,{issueKey, minutes, comment});
+// editExisting removes a logged worklog from Jira and re-opens it as a
+// suggested row, so editing always ends in an explicit resubmission.
+async function editExisting(date, id) {
+  showOverlay('Reopening worklog for editing…');
+  try {
+    const updated = await api('POST','/days/'+date+'/existing/'+id+'/edit');
     const i = days.findIndex(d=>d.date===date);
     if (i>=0) days[i] = updated;
     renderDetail(updated);
     renderList();
+    const row = document.querySelector('#sugg-table tr.row-editing');
+    if (row) row.scrollIntoView({block:'center'});
+    const timeInput = row ? row.querySelector('input[placeholder="1h 30m"]') : null;
+    if (timeInput) { timeInput.focus(); timeInput.select(); }
+    toast('Deleted from Jira. Edit and resubmit.');
   } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
 }
 
 async function deleteExisting(date, id) {
@@ -3429,6 +3486,19 @@ async function clonePrev(date) {
     renderDetail(updated);
     renderList();
     toast('Cloned from previous day.');
+  } catch(e) { toast(e.message, true); }
+  finally { hideOverlay(); }
+}
+
+async function rebuildDay(date) {
+  showOverlay('Rebuilding day plan…');
+  try {
+    const res = await api('POST','/days/'+date+'/rebuild');
+    const i = days.findIndex(d=>d.date===date);
+    if (i>=0) days[i] = res.day;
+    renderDetail(res.day);
+    renderList();
+    toast('Plan rebuilt for '+date+'.');
   } catch(e) { toast(e.message, true); }
   finally { hideOverlay(); }
 }

@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.36.0-beta.1] — 2026-09-21
+### Added
+- A **↻ Rebuild plan** button in the top-right of the day window ([#102](https://github.com/kwkgaya/timereporting-assistant/issues/102)). Until now a day plan was only ever recomputed while it was still an unbuilt stub, on a status change, or as part of a full reload — there was no way to ask for "recompute just this day" once it had been built
+
+### Changed
+- Editing an already-logged worklog no longer edits it in place. The ✏️ button now deletes the worklog from Jira and re-opens it at the top of **Suggested worklogs**, highlighted in yellow, with the issue key locked and the time field focused ([#103](https://github.com/kwkgaya/timereporting-assistant/issues/103)). Pressing "Approve & submit" mid-edit is therefore no longer ambiguous: there is no half-edited state to lose, just an ordinary suggested row waiting to be submitted
+
+### Fixed
+- A Jira issue that already had a worklog for the day still received a share of the remaining time when the plan was built, producing a duplicate suggestion for work that was already logged ([#101](https://github.com/kwkgaya/timereporting-assistant/issues/101)). Such issues are now excluded from the distribution, and the day notes list what was skipped
+- The delete ✕ on an already-logged worklog returned 405 Method Not Allowed — `DELETE /api/days/{date}/existing/{id}` was never registered as a route
+
 ## [0.35.4] — 2026-08-29
 ### Fixed
 - "Clone previous day" was still offered on days that are locked because they are already complete (Jira time at or above the daily target). The button now follows the same rule as the day-status selector and is hidden for submitted *and* fully-logged days

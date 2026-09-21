@@ -40,4 +40,14 @@ test.describe('Day list', () => {
     await expect(app.locator('.summary-line')).toContainText('Suggested:');
     await expect(app.locator('.summary-line')).toContainText(/Balance:|Total:/);
   });
+
+  test('rebuild button is shown top-right of the day window and rebuilds the plan', async ({ app }) => {
+    await app.locator('.iday-item').first().click();
+    await app.waitForSelector('#rebuild-btn');
+    await expect(app.locator('#rebuild-btn')).toBeVisible();
+    await app.locator('#rebuild-btn').click();
+    await app.waitForTimeout(800);
+    // Day view is still rendered after the rebuild.
+    await expect(app.locator('h2')).toContainText('2026-06');
+  });
 });

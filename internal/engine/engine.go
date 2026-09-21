@@ -165,11 +165,22 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 	grouped := jirakey.GroupByKey(activities)
 	plan.Unassigned = grouped.Unassigned
 
-	if len(grouped.Groups) == 0 {
-		if len(grouped.Unassigned) > 0 {
+	// An issue that already has a worklog for this day must not receive another
+	// share of the remaining time.
+	candidates, skipped := dropLoggedKeys(grouped.Groups, existing)
+	if len(skipped) > 0 {
+		notes = append(notes, fmt.Sprintf("skipped %s — already logged for this day", strings.Join(skipped, ", ")))
+	}
+
+	if len(candidates) == 0 {
+		switch {
+		case len(grouped.Groups) > 0:
+			// Every candidate issue already has a worklog for this day.
+			notes = append(notes, "all issues with activity are already logged — select a task from the search box to log more time")
+		case len(grouped.Unassigned) > 0:
 			// Git/GitHub activity exists but none could be mapped to a Jira key.
 			notes = append(notes, "unable to determine the Jira task from available activity — please assign manually")
-		} else {
+		default:
 			// No activity: leave suggestions empty — user can pick a task from the dropdown.
 			notes = append(notes, "no activity found — select a task from the search box to log time")
 		}
@@ -177,8 +188,8 @@ func BuildDayPlan(cfg Config, day time.Time, status model.DayStatus,
 		return plan
 	}
 
-	allocs := allocate(grouped.Groups, remaining)
-	for i, g := range grouped.Groups {
+	allocs := allocate(candidates, remaining)
+	for i, g := range candidates {
 		if allocs[i] <= 0 {
 			continue
 		}
@@ -217,6 +228,30 @@ func ClonePreviousDay(dest model.DayPlan, src model.DayPlan) model.DayPlan {
 		dest.Suggested = append(dest.Suggested, clone)
 	}
 	return dest
+}
+
+// dropLoggedKeys removes groups whose Jira key already has a worklog for the
+// day, returning the remaining groups and the keys that were dropped.
+func dropLoggedKeys(groups []jirakey.KeyGroup, existing []model.Worklog) ([]jirakey.KeyGroup, []string) {
+	logged := map[string]bool{}
+	for _, wl := range existing {
+		if wl.IssueKey != "" {
+			logged[strings.ToUpper(wl.IssueKey)] = true
+		}
+	}
+	if len(logged) == 0 {
+		return groups, nil
+	}
+	kept := make([]jirakey.KeyGroup, 0, len(groups))
+	var skipped []string
+	for _, g := range groups {
+		if logged[strings.ToUpper(g.Key)] {
+			skipped = append(skipped, g.Key)
+			continue
+		}
+		kept = append(kept, g)
+	}
+	return kept, skipped
 }
 
 // allocate distributes totalMins across groups proportionally, rounded to
